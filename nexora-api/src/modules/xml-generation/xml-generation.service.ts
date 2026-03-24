@@ -1,188 +1,105 @@
-// src/modules/xml-generation/xml-generation.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { create } from 'xmlbuilder2';
 import { Invoice } from '../invoices/entities/invoice.entity';
-import { EnvironmentType } from '../../common/enums/environment-type.enum';
 import Decimal from 'decimal.js';
+import { formatDateSri } from '../../common/utils/date.util';
 
-// ⚠️ PENDIENTE DE PARAMETRIZACIÓN CRÍTICA
-// Esta estructura XML corresponde a la ficha técnica de comprobantes
-// electrónicos del SRI Ecuador.
-// ANTES de usar en producción DEBES:
-// 1. Descargar la ficha técnica vigente del SRI (https://www.sri.gob.ec)
-// 2. Verificar la versión del esquema (actualmente v2.1.0 pero puede cambiar)
-// 3. Verificar cada campo, su longitud máxima y validaciones
-// 4. Probar contra el validador del SRI en ambiente de pruebas
-// 5. Verificar el manejo de campos opcionales vs obligatorios
-
+// ⚠️ PENDIENTE — verificar estructura completa con ficha técnica SRI vigente
 @Injectable()
 export class XmlGenerationService {
   private readonly logger = new Logger(XmlGenerationService.name);
-
-  // ⚠️ Versión del esquema — VERIFICAR con ficha técnica SRI vigente
-  private readonly SCHEMA_VERSION = '2.1.0';
-  private readonly ID_COMPROBANTE = '01'; // factura — verificar con ficha técnica
+  private readonly SCHEMA_VERSION = '2.1.0'; // ⚠️ verificar versión vigente
 
   async generateInvoiceXml(invoice: Invoice): Promise<string> {
     if (!invoice.customer || !invoice.items || !invoice.company) {
-      throw new Error(
-        'La factura debe incluir customer, items y company para generar XML',
-      );
+      throw new Error('La factura requiere customer, items y company cargados');
     }
-
-    try {
-      const xml = this.buildFacturaXml(invoice);
-      return xml;
-    } catch (error) {
-      this.logger.error(`Error generando XML para factura ${invoice.id}`, error);
-      throw new Error(`Generación XML fallida: ${error.message}`);
-    }
+    return this.buildXml(invoice);
   }
 
-  private buildFacturaXml(invoice: Invoice): string {
-    // ⚠️ Estructura según ficha técnica SRI — VERIFICAR cada elemento
-    const doc = create({ version: '1.0', encoding: 'UTF-8' })
-      .ele('factura', {
-        id: 'comprobante',
-        version: this.SCHEMA_VERSION,
-      });
+  private buildXml(invoice: Invoice): string {
+    const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele('factura', {
+      id: 'comprobante',
+      version: this.SCHEMA_VERSION,
+    });
 
-    // ─── infoTributaria ─────────────────────────────────────────────────────
-    const infoTributaria = doc.ele('infoTributaria');
-    // ⚠️ ambiente: '1' pruebas, '2' producción — verificar con ficha técnica
-    infoTributaria.ele('ambiente').txt(invoice.company.sriEnvironment);
-    // ⚠️ tipoEmision: '1' normal — verificar con ficha técnica
-    infoTributaria.ele('tipoEmision').txt(invoice.company.emissionType);
-    infoTributaria.ele('razonSocial').txt(invoice.company.businessName);
-    infoTributaria.ele('nombreComercial').txt(
-      invoice.company.tradeName || invoice.company.businessName,
-    );
-    infoTributaria.ele('ruc').txt(invoice.company.ruc);
-    infoTributaria.ele('claveAcceso').txt(invoice.accessKey);
-    // ⚠️ codDoc: '01' factura — verificar con ficha técnica
-    infoTributaria.ele('codDoc').txt(this.ID_COMPROBANTE);
-    infoTributaria.ele('estab').txt(invoice.company.establishmentCode);
-    infoTributaria.ele('ptoEmi').txt(invoice.company.emissionPoint);
-    infoTributaria.ele('secuencial').txt(
-      invoice.sequential.split('-')[2], // solo los 9 dígitos del secuencial
-    );
-    infoTributaria.ele('dirMatriz').txt(invoice.company.address);
+    // ─── infoTributaria ──────────────────────────────────────────
+    const info = doc.ele('infoTributaria');
+    info.ele('ambiente').txt(invoice.company.sriEnvironment);       // ⚠️ verificar
+    info.ele('tipoEmision').txt(invoice.company.emissionType);      // ⚠️ verificar
+    info.ele('razonSocial').txt(invoice.company.businessName);
+    info.ele('nombreComercial').txt(invoice.company.tradeName || invoice.company.businessName);
+    info.ele('ruc').txt(invoice.company.ruc);
+    info.ele('claveAcceso').txt(invoice.accessKey);
+    info.ele('codDoc').txt('01');                                    // ⚠️ verificar código factura
+    info.ele('estab').txt(invoice.company.establishmentCode);
+    info.ele('ptoEmi').txt(invoice.company.emissionPoint);
+    info.ele('secuencial').txt(invoice.sequential.split('-')[2]);
+    info.ele('dirMatriz').txt(invoice.company.address);
 
-    // ─── infoFactura ─────────────────────────────────────────────────────────
-    const infoFactura = doc.ele('infoFactura');
-    infoFactura.ele('fechaEmision').txt(this.formatDate(invoice.issueDate));
-    infoFactura.ele('dirEstablecimiento').txt(invoice.company.address);
-    // ⚠️ obligadoContabilidad: verificar campo y valores con ficha técnica
-    infoFactura.ele('obligadoContabilidad').txt('NO');
-    // ⚠️ tipoIdentificacionComprador: verificar códigos con ficha técnica
-    infoFactura
-      .ele('tipoIdentificacionComprador')
-      .txt(invoice.customer.identificationType);
-    infoFactura.ele('razonSocialComprador').txt(invoice.customer.fullName);
-    infoFactura
-      .ele('identificacionComprador')
-      .txt(invoice.customer.identification);
-    infoFactura.ele('totalSinImpuestos').txt(
-      this.formatDecimal(
-        new Decimal(invoice.subtotalNoTax)
-          .plus(invoice.subtotalTaxable)
-          .toNumber(),
-      ),
+    // ─── infoFactura ─────────────────────────────────────────────
+    const fact = doc.ele('infoFactura');
+    fact.ele('fechaEmision').txt(formatDateSri(new Date(invoice.issueDate)));
+    fact.ele('dirEstablecimiento').txt(invoice.company.address);
+    fact.ele('obligadoContabilidad').txt('NO');                     // ⚠️ parametrizar por empresa
+    fact.ele('tipoIdentificacionComprador').txt(invoice.customer.identificationType);
+    fact.ele('razonSocialComprador').txt(invoice.customer.fullName);
+    fact.ele('identificacionComprador').txt(invoice.customer.identification);
+    fact.ele('totalSinImpuestos').txt(
+      new Decimal(invoice.subtotalNoTax).plus(invoice.subtotalTaxable).toFixed(2),
     );
-    infoFactura.ele('totalDescuento').txt(
-      this.formatDecimal(Number(invoice.discountTotal)),
-    );
+    fact.ele('totalDescuento').txt(new Decimal(invoice.discountTotal).toFixed(2));
 
-    // totalConImpuestos — estructura por tarifa
-    const totalConImpuestos = infoFactura.ele('totalConImpuestos');
-    // ⚠️ Este bloque debe generarse dinámicamente por tarifa de IVA aplicada
-    // PENDIENTE: agrupar ítems por tarifa y generar un totalImpuesto por cada una
+    const totalImp = fact.ele('totalConImpuestos');
     if (Number(invoice.subtotalTaxable) > 0) {
-      const totalImpuesto = totalConImpuestos.ele('totalImpuesto');
-      // ⚠️ código e identificador — verificar con ficha técnica SRI
-      totalImpuesto.ele('codigo').txt('2'); // IVA
-      totalImpuesto.ele('codigoPorcentaje').txt('2'); // 12% — verificar
-      totalImpuesto.ele('baseImponible').txt(
-        this.formatDecimal(Number(invoice.subtotalTaxable)),
-      );
-      totalImpuesto.ele('valor').txt(
-        this.formatDecimal(Number(invoice.taxAmount)),
-      );
+      const ti = totalImp.ele('totalImpuesto');
+      ti.ele('codigo').txt('2');             // ⚠️ código IVA — verificar
+      ti.ele('codigoPorcentaje').txt('2');   // ⚠️ 12% — verificar tarifa vigente
+      ti.ele('baseImponible').txt(new Decimal(invoice.subtotalTaxable).toFixed(2));
+      ti.ele('valor').txt(new Decimal(invoice.taxAmount).toFixed(2));
     }
 
-    infoFactura.ele('propina').txt('0.00');
-    infoFactura.ele('importeTotal').txt(
-      this.formatDecimal(Number(invoice.total)),
-    );
-    // ⚠️ moneda: verificar campo con ficha técnica — generalmente 'DOLAR'
-    infoFactura.ele('moneda').txt('DOLAR');
+    fact.ele('propina').txt('0.00');
+    fact.ele('importeTotal').txt(new Decimal(invoice.total).toFixed(2));
+    fact.ele('moneda').txt('DOLAR');
 
-    // ─── detalles ────────────────────────────────────────────────────────────
+    // ─── detalles ─────────────────────────────────────────────────
     const detalles = doc.ele('detalles');
     for (const item of invoice.items) {
-      const detalle = detalles.ele('detalle');
-      // ⚠️ Longitudes máximas de campos — verificar con ficha técnica
-      detalle.ele('codigoPrincipal').txt(item.productCode.substring(0, 25));
-      detalle.ele('descripcion').txt(item.description.substring(0, 300));
-      detalle.ele('cantidad').txt(this.formatDecimal(Number(item.quantity), 6));
-      detalle.ele('precioUnitario').txt(
-        this.formatDecimal(Number(item.unitPrice), 6),
-      );
-      detalle.ele('descuento').txt(this.formatDecimal(Number(item.discount)));
-      detalle.ele('precioTotalSinImpuesto').txt(
-        this.formatDecimal(Number(item.subtotal)),
-      );
-
-      const impuestos = detalle.ele('impuestos');
-      const impuesto = impuestos.ele('impuesto');
-      // ⚠️ código e identificador — verificar con ficha técnica SRI
-      impuesto.ele('codigo').txt('2');
-      impuesto.ele('codigoPorcentaje').txt(item.ivaRate);
-      impuesto.ele('tarifa').txt(this.getIvaRatePercent(item.ivaRate));
-      impuesto.ele('baseImponible').txt(
-        this.formatDecimal(Number(item.subtotal)),
-      );
-      impuesto.ele('valor').txt(this.formatDecimal(Number(item.taxAmount)));
+      const d = detalles.ele('detalle');
+      d.ele('codigoPrincipal').txt(String(item.productCode).substring(0, 25));
+      d.ele('descripcion').txt(String(item.description).substring(0, 300));
+      d.ele('cantidad').txt(new Decimal(item.quantity).toFixed(6));
+      d.ele('precioUnitario').txt(new Decimal(item.unitPrice).toFixed(6));
+      d.ele('descuento').txt(new Decimal(item.discount).toFixed(2));
+      d.ele('precioTotalSinImpuesto').txt(new Decimal(item.subtotal).toFixed(2));
+      const imp = d.ele('impuestos').ele('impuesto');
+      imp.ele('codigo').txt('2');
+      imp.ele('codigoPorcentaje').txt(item.ivaRate);
+      imp.ele('tarifa').txt(this.ivaPercent(item.ivaRate));
+      imp.ele('baseImponible').txt(new Decimal(item.subtotal).toFixed(2));
+      imp.ele('valor').txt(new Decimal(item.taxAmount).toFixed(2));
     }
 
-    // ─── infoAdicional (opcional) ────────────────────────────────────────────
+    // ─── infoAdicional ────────────────────────────────────────────
     if (invoice.customer.email || invoice.customer.phone) {
-      const infoAdicional = doc.ele('infoAdicional');
+      const extra = doc.ele('infoAdicional');
       if (invoice.customer.email) {
-        infoAdicional
-          .ele('campoAdicional', { nombre: 'email' })
-          .txt(invoice.customer.email);
+        extra.ele('campoAdicional', { nombre: 'email' }).txt(invoice.customer.email);
       }
       if (invoice.customer.phone) {
-        infoAdicional
-          .ele('campoAdicional', { nombre: 'telefono' })
-          .txt(invoice.customer.phone);
+        extra.ele('campoAdicional', { nombre: 'telefono' }).txt(invoice.customer.phone);
       }
     }
 
-    return doc.end({ prettyPrint: false }); // el SRI espera XML compacto
+    return doc.end({ prettyPrint: false });
   }
 
-  private formatDate(date: Date): string {
-    const d = String(date.getDate()).padStart(2, '0');
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const y = date.getFullYear();
-    return `${d}/${m}/${y}`; // ⚠️ formato dd/mm/yyyy — verificar con ficha técnica
-  }
-
-  private formatDecimal(value: number, places = 2): string {
-    return new Decimal(value).toFixed(places);
-  }
-
-  // ⚠️ PENDIENTE DE PARAMETRIZACIÓN — verificar porcentajes vigentes con SRI
-  private getIvaRatePercent(ivaRate: string): string {
-    const rates: Record<string, string> = {
-      '0': '0',
-      '2': '12', // Verificar tarifa vigente
-      '3': '15', // Verificar si aplica
-      '6': '0',
-      '7': '0',
+  // ⚠️ Verificar porcentajes vigentes con SRI
+  private ivaPercent(rate: string): string {
+    const m: Record<string, string> = {
+      '0': '0', '2': '12', '3': '15', '6': '0', '7': '0',
     };
-    return rates[ivaRate] ?? '0';
+    return m[rate] ?? '0';
   }
 }

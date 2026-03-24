@@ -1,11 +1,8 @@
-// src/modules/jobs/processors/generate-ride.processor.ts
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Job } from 'bull';
-import * as PDFDocument from 'pdfkit';
-
+import type { Job } from 'bull';
 import { QueueName, JobName } from '../../../common/enums/queue-name.enum';
 import { TaxDocumentStatus } from '../../../common/enums/tax-document-status.enum';
 import { TaxDocumentEventType } from '../../tax-documents/entities/tax-document-event.entity';
@@ -13,6 +10,8 @@ import { TaxDocument } from '../../tax-documents/entities/tax-document.entity';
 import { Invoice } from '../../invoices/entities/invoice.entity';
 import { TaxDocumentsService } from '../../tax-documents/tax-documents.service';
 import { StorageService } from '../../storage/storage.service';
+import { RideService } from '../../ride/ride.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 
 export interface GenerateRideJobData {
   invoiceId: string;
@@ -29,8 +28,10 @@ export class GenerateRideProcessor {
     private readonly taxDocRepo: Repository<TaxDocument>,
     @InjectRepository(Invoice)
     private readonly invoiceRepo: Repository<Invoice>,
-    private readonly taxDocumentsService: TaxDocumentsService,
-    private readonly storageService: StorageService,
+    private readonly taxDocSvc: TaxDocumentsService,
+    private readonly rideSvc: RideService,
+    private readonly storageSvc: StorageService,
+    private readonly notifSvc: NotificationsService,
   ) {}
 
   @Process(JobName.GENERATE_RIDE)
@@ -45,115 +46,54 @@ export class GenerateRideProcessor {
       });
       if (!invoice) throw new Error(`Factura ${invoiceId} no encontrada`);
       if (!invoice.taxDocument?.authorizationNumber) {
-        throw new Error('Factura no autorizada, no se puede generar RIDE');
+        throw new Error('Factura no autorizada — no se puede generar RIDE');
       }
 
-      // Generar PDF
-      // ⚠️ El formato del RIDE está definido en la ficha técnica del SRI.
-      // Esta es una implementación básica. El RIDE real debe incluir:
-      // - Datos del emisor con logo
-      // - Datos del receptor
-      // - Detalle de ítems en tabla
-      // - Totales e impuestos
-      // - Número de autorización y código QR
-      // - Código de barras de la clave de acceso
-      // Todo según el formato oficial del SRI.
-      const pdfBuffer = await this.generateRidePdf(invoice);
+      const pdfBuffer = await this.rideSvc.generatePdf(invoice);
+      const now = new Date();
+      const pdfPath =
+        `${companyId}/pdf/${now.getFullYear()}/` +
+        `${String(now.getMonth() + 1).padStart(2, '0')}/` +
+        `${invoice.accessKey}.pdf`;
 
-      const pdfPath = `${companyId}/pdf/${new Date().getFullYear()}/${String(new Date().getMonth() + 1).padStart(2, '0')}/${invoice.accessKey}.pdf`;
-      await this.storageService.upload(pdfPath, pdfBuffer);
-
+      await this.storageSvc.upload(pdfPath, pdfBuffer);
       await this.taxDocRepo.update(taxDocumentId, {
         ridePdfPath: pdfPath,
-        sriStatus: TaxDocumentStatus.RIDE_GENERATED,
+        sriStatus: TaxDocumentStatus.AUTHORIZED,
       });
-
-      await this.taxDocumentsService.addEvent(taxDocumentId, {
+      await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.RIDE_GENERATED,
-        sriStatus: TaxDocumentStatus.RIDE_GENERATED,
+        sriStatus: TaxDocumentStatus.AUTHORIZED,
         metadata: { pdfPath },
       });
 
-      this.logger.log(`RIDE generado: invoice=${invoiceId}`);
-    } catch (error) {
-      this.logger.error(
-        `Error generando RIDE: invoice=${invoiceId}`,
-        error.stack,
-      );
+      // Notificar al cliente si tiene email
+      if (invoice.customer?.email) {
+        const xmlBuf = invoice.taxDocument.signedXmlPath
+          ? await this.storageSvc.download(invoice.taxDocument.signedXmlPath)
+          : Buffer.alloc(0);
 
-      await this.taxDocumentsService.addEvent(taxDocumentId, {
-        eventType: TaxDocumentEventType.RIDE_FAILED,
-        sriStatus: TaxDocumentStatus.AUTHORIZED, // la autorización no se pierde
-        errorDetail: error.message,
-      });
-
-      // El RIDE es importante pero no bloquea la autorización
-      // Reintentará por la configuración de BullMQ
-      throw error;
-    }
-  }
-
-  // ⚠️ PENDIENTE — Implementar según formato oficial RIDE del SRI Ecuador
-  private generateRidePdf(invoice: Invoice): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
-      const buffers: Buffer[] = [];
-
-      doc.on('data', (chunk) => buffers.push(chunk));
-      doc.on('end', () => resolve(Buffer.concat(buffers)));
-      doc.on('error', reject);
-
-      // ─── Encabezado ──────────────────────────────────────────────────────
-      doc
-        .fontSize(16)
-        .text(invoice.company.businessName, { align: 'center' });
-      doc.fontSize(10).text(`RUC: ${invoice.company.ruc}`, { align: 'center' });
-      doc.text(`Dirección: ${invoice.company.address}`, { align: 'center' });
-      doc.moveDown();
-
-      // Datos del comprobante
-      doc.fontSize(12).text('FACTURA', { align: 'center', underline: true });
-      doc.fontSize(10).text(`No.: ${invoice.sequential}`);
-      doc.text(`Clave de acceso: ${invoice.accessKey}`);
-      doc.text(
-        `Autorización: ${invoice.taxDocument?.authorizationNumber ?? 'N/A'}`,
-      );
-      doc.text(
-        `Fecha emisión: ${new Date(invoice.issueDate).toLocaleDateString('es-EC')}`,
-      );
-      doc.moveDown();
-
-      // ─── Datos del receptor ───────────────────────────────────────────────
-      doc.text(`Receptor: ${invoice.customer.fullName}`);
-      doc.text(
-        `Identificación: ${invoice.customer.identificationType} - ${invoice.customer.identification}`,
-      );
-      if (invoice.customer.address) {
-        doc.text(`Dirección: ${invoice.customer.address}`);
-      }
-      doc.moveDown();
-
-      // ─── Detalle de ítems ─────────────────────────────────────────────────
-      doc.text('DETALLE', { underline: true });
-      for (const item of invoice.items) {
-        doc.text(
-          `${item.description} | Cant: ${item.quantity} | P.Unit: $${Number(item.unitPrice).toFixed(2)} | Total: $${Number(item.subtotal).toFixed(2)}`,
+        await this.notifSvc.sendInvoiceToCustomer(
+          invoice.customer.email,
+          invoice.sequential,
+          pdfBuffer,
+          xmlBuf,
         );
+        await this.taxDocSvc.addEvent(taxDocumentId, {
+          eventType: TaxDocumentEventType.NOTIFICATION_SENT,
+          metadata: { email: invoice.customer.email },
+        });
       }
-      doc.moveDown();
 
-      // ─── Totales ──────────────────────────────────────────────────────────
-      doc.text(`Subtotal 0%: $${Number(invoice.subtotalNoTax).toFixed(2)}`);
-      doc.text(`Subtotal IVA: $${Number(invoice.subtotalTaxable).toFixed(2)}`);
-      doc.text(`IVA: $${Number(invoice.taxAmount).toFixed(2)}`);
-      doc
-        .fontSize(12)
-        .text(`TOTAL: $${Number(invoice.total).toFixed(2)}`, { bold: true });
-
-      // ⚠️ Agregar código QR con la clave de acceso (requerido por SRI)
-      // Usar librería qrcode para generar el QR de la clave de acceso
-
-      doc.end();
-    });
+      this.logger.log(`RIDE generado: invoice=${invoiceId} path=${pdfPath}`);
+    } catch (err) {
+      this.logger.error(`Error generando RIDE invoice=${invoiceId}`, err.stack);
+      await this.taxDocSvc.addEvent(taxDocumentId, {
+        eventType: TaxDocumentEventType.RIDE_FAILED,
+        sriStatus: TaxDocumentStatus.AUTHORIZED, // autorización intacta
+        errorDetail: err.message,
+      });
+      throw err;
+    }
   }
 }

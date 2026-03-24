@@ -6,5 +6,4 @@ export enum IdentificationType {
   PASAPORTE = '06',      // Pasaporte
   CONSUMIDOR_FINAL = '07', // Consumidor final (sin identificación específica)
   EXTERIOR = '08',       // Identificación del exterior
-  PLACA = '09',          // Placa (para guías de remisión, no aplica en facturas)
 }

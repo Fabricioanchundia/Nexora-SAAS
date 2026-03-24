@@ -1,58 +1,86 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
-
+ 
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
 import redisConfig from './config/redis.config';
 import storageConfig from './config/storage.config';
-
-import { getDatabaseConfig } from './config/database.config';
+ 
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CompaniesModule } from './modules/companies/companies.module';
+import { CertificatesModule } from './modules/certificates/certificates.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { ProductsModule } from './modules/products/products.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { TaxDocumentsModule } from './modules/tax-documents/tax-documents.module';
-import { CertificatesModule } from './modules/certificates/certificates.module';
-import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+import { XmlGenerationModule } from './modules/xml-generation/xml-generation.module';
+import { SigningModule } from './modules/signing/signing.module';
+import { SriIntegrationModule } from './modules/sri-integration/sri-integration.module';
+import { RideModule } from './modules/ride/ride.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '.env',
       load: [appConfig, databaseConfig, jwtConfig, redisConfig, storageConfig],
     }),
+
     TypeOrmModule.forRootAsync({
-      useFactory: getDatabaseConfig,
       inject: [ConfigService],
+      useFactory: (cfg: ConfigService) => ({
+        type: 'postgres',
+        host: cfg.get<string>('database.host'),
+        port: cfg.get<number>('database.port'),
+        database: cfg.get<string>('database.name'),
+        username: cfg.get<string>('database.user'),
+        password: cfg.get<string>('database.password'),
+        ssl: cfg.get<boolean>('database.ssl'),
+        logging: cfg.get<boolean>('database.logging'),
+        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        // ⚠️ synchronize: true solo para desarrollo — en producción usar migraciones
+        synchronize: cfg.get<string>('app.nodeEnv') !== 'production',
+        autoLoadEntities: true,
+      }),
     }),
+
     BullModule.forRootAsync({
-      useFactory: (configService: ConfigService) => ({
+      inject: [ConfigService],
+      useFactory: (cfg: ConfigService) => ({
         redis: {
-          host: configService.get('redis.host'),
-          port: configService.get('redis.port'),
-          password: configService.get('redis.password') || undefined,
+          host: cfg.get<string>('redis.host'),
+          port: cfg.get<number>('redis.port'),
+          password: cfg.get<string>('redis.password') || undefined,
         },
       }),
-      inject: [ConfigService],
     }),
+
     AuthModule,
     UsersModule,
     CompaniesModule,
+    CertificatesModule,
     CustomersModule,
     ProductsModule,
     InvoicesModule,
     TaxDocumentsModule,
-    CertificatesModule,
-    AuditLogsModule,
+    XmlGenerationModule,
+    SigningModule,
+    SriIntegrationModule,
+    RideModule,
+    NotificationsModule,
+    ReportsModule,
     StorageModule,
     JobsModule,
+    AuditLogsModule,
   ],
 })
 export class AppModule {}

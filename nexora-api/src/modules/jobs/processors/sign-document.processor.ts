@@ -1,17 +1,14 @@
-// src/modules/jobs/processors/sign-document.processor.ts
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
-import { Job, Queue } from 'bull';
-
+import type { Job } from 'bull';
+import type { Queue } from 'bull';
 import { QueueName, JobName } from '../../../common/enums/queue-name.enum';
 import { TaxDocumentStatus } from '../../../common/enums/tax-document-status.enum';
 import { InvoiceStatus } from '../../../common/enums/invoice-status.enum';
-import {
-  TaxDocumentEventType,
-} from '../../tax-documents/entities/tax-document-event.entity';
+import { TaxDocumentEventType } from '../../tax-documents/entities/tax-document-event.entity';
 import { TaxDocument } from '../../tax-documents/entities/tax-document.entity';
 import { Invoice } from '../../invoices/entities/invoice.entity';
 import { TaxDocumentsService } from '../../tax-documents/tax-documents.service';
@@ -35,119 +32,95 @@ export class SignDocumentProcessor {
     private readonly taxDocRepo: Repository<TaxDocument>,
     @InjectRepository(Invoice)
     private readonly invoiceRepo: Repository<Invoice>,
-    private readonly taxDocumentsService: TaxDocumentsService,
-    private readonly xmlGenerationService: XmlGenerationService,
-    private readonly signingService: SigningService,
-    private readonly certificatesService: CertificatesService,
-    private readonly storageService: StorageService,
+    private readonly taxDocSvc: TaxDocumentsService,
+    private readonly xmlSvc: XmlGenerationService,
+    private readonly signSvc: SigningService,
+    private readonly certSvc: CertificatesService,
+    private readonly storageSvc: StorageService,
     @InjectQueue(QueueName.DOCUMENT_TRANSMISSION)
-    private readonly transmissionQueue: Queue,
+    private readonly txQueue: Queue,
   ) {}
 
   @Process(JobName.SIGN_DOCUMENT)
   async handle(job: Job<SignDocumentJobData>): Promise<void> {
     const { invoiceId, taxDocumentId, companyId } = job.data;
-    this.logger.log(`Procesando firma: invoice=${invoiceId}`);
+    this.logger.log(
+      `Firmando: invoice=${invoiceId} intento=${job.attemptsMade + 1}`,
+    );
 
-    // Actualizar estado a PROCESSING
-    await this.invoiceRepo.update(invoiceId, {
-      status: InvoiceStatus.PROCESSING,
-    });
-
-    await this.taxDocumentsService.addEvent(taxDocumentId, {
+    await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.PROCESSING });
+    await this.taxDocSvc.addEvent(taxDocumentId, {
       eventType: TaxDocumentEventType.SIGN_STARTED,
       sriStatus: TaxDocumentStatus.PENDING_SIGN,
-      metadata: { jobId: job.id, attempt: job.attemptsMade },
+      metadata: { jobId: String(job.id), attempt: job.attemptsMade },
     });
 
     try {
-      // 1. Cargar la factura completa con sus relaciones
       const invoice = await this.invoiceRepo.findOne({
         where: { id: invoiceId },
         relations: ['company', 'customer', 'items'],
       });
       if (!invoice) throw new Error(`Factura ${invoiceId} no encontrada`);
 
-      // 2. Generar XML
-      const xmlString = await this.xmlGenerationService.generateInvoiceXml(invoice);
-
-      // 3. Guardar XML sin firmar
-      const xmlPath = `${companyId}/xml/${new Date().getFullYear()}/${String(new Date().getMonth() + 1).padStart(2, '0')}/${invoice.accessKey}.xml`;
-      await this.storageService.upload(xmlPath, Buffer.from(xmlString, 'utf-8'));
-
+      // 1. Generar XML
+      const xmlString = await this.xmlSvc.generateInvoiceXml(invoice);
+      const now = new Date();
+      const prefix = `${companyId}/xml/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const xmlPath = `${prefix}/${invoice.accessKey}.xml`;
+      await this.storageSvc.upload(xmlPath, Buffer.from(xmlString, 'utf-8'));
       await this.taxDocRepo.update(taxDocumentId, { xmlPath });
 
-      // 4. Obtener certificado y firmar
-      const { buffer: p12Buffer, passphrase } =
-        await this.certificatesService.getCertificateForSigning(companyId);
+      // 2. Firmar con .p12
+      const { buffer: p12, passphrase } =
+        await this.certSvc.getCertForSigning(companyId);
+      const signedXml = await this.signSvc.signXml(xmlString, p12, passphrase);
+      const signedPath = `${prefix}/${invoice.accessKey}-signed.xml`;
+      await this.storageSvc.upload(signedPath, Buffer.from(signedXml, 'utf-8'));
 
-      const signedXml = await this.signingService.signXml(
-        xmlString,
-        p12Buffer,
-        passphrase,
-      );
-
-      // 5. Guardar XML firmado
-      const signedXmlPath = `${companyId}/xml/${new Date().getFullYear()}/${String(new Date().getMonth() + 1).padStart(2, '0')}/${invoice.accessKey}-signed.xml`;
-      await this.storageService.upload(
-        signedXmlPath,
-        Buffer.from(signedXml, 'utf-8'),
-      );
-
-      // 6. Actualizar estado
+      // 3. Actualizar estado
       await this.taxDocRepo.update(taxDocumentId, {
-        signedXmlPath,
+        signedXmlPath: signedPath,
         sriStatus: TaxDocumentStatus.SIGNED,
       });
-
-      await this.taxDocumentsService.addEvent(taxDocumentId, {
+      await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.SIGN_COMPLETED,
         sriStatus: TaxDocumentStatus.SIGNED,
-        metadata: { xmlPath, signedXmlPath },
+        metadata: { xmlPath, signedPath },
       });
 
-      // 7. Encolar transmisión
-      await this.transmissionQueue.add(
+      // 4. Encolar transmisión
+      await this.txQueue.add(
         JobName.TRANSMIT_DOCUMENT,
         {
-          invoiceId,
-          taxDocumentId,
-          companyId,
-          signedXmlPath,
+          invoiceId, taxDocumentId, companyId,
+          signedXmlPath: signedPath,
           accessKey: invoice.accessKey,
           environment: invoice.company.sriEnvironment,
         },
         {
           attempts: 5,
           backoff: { type: 'exponential', delay: 10000 },
-          delay: 2000, // esperar 2s antes del primer intento
+          delay: 2000,
           removeOnComplete: false,
           removeOnFail: false,
         },
       );
 
       this.logger.log(`Firma completada: invoice=${invoiceId}`);
-    } catch (error) {
-      this.logger.error(`Error en firma: invoice=${invoiceId}`, error.stack);
-
+    } catch (err) {
+      this.logger.error(`Error firmando invoice=${invoiceId}`, err.stack);
       await this.taxDocRepo.update(taxDocumentId, {
-        sriStatus: TaxDocumentStatus.PENDING_SIGN, // volver al estado anterior
-        lastError: error.message,
+        sriStatus: TaxDocumentStatus.PENDING_SIGN,
+        lastError: err.message,
       });
-
-      await this.taxDocumentsService.addEvent(taxDocumentId, {
+      await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.SIGN_FAILED,
         sriStatus: TaxDocumentStatus.PENDING_SIGN,
-        errorDetail: error.message,
-        metadata: { jobId: job.id, attempt: job.attemptsMade },
+        errorDetail: err.message,
+        metadata: { attempt: job.attemptsMade },
       });
-
-      await this.invoiceRepo.update(invoiceId, {
-        status: InvoiceStatus.ERROR,
-      });
-
-      // Re-lanzar para que BullMQ gestione el reintento
-      throw error;
+      await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.ERROR });
+      throw err;
     }
   }
 }

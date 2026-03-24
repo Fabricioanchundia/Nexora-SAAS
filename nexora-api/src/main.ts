@@ -13,31 +13,28 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port', 3000);
   const prefix = configService.get<string>('app.prefix', 'api/v1');
-  const frontendUrl = configService.get<string>('app.frontendUrl');
+  const frontendUrl = configService.get<string>(
+    'app.frontendUrl',
+    'http://localhost:3001',
+  );
 
   app.setGlobalPrefix(prefix);
 
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,          // elimina campos no declarados en el DTO
-      forbidNonWhitelisted: true, // lanza error si llegan campos extra
-      transform: true,          // convierte tipos automáticamente
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
 
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  app.enableCors({
-    origin: frontendUrl,
-    credentials: true,
-  });
+  app.enableCors({ origin: frontendUrl, credentials: true });
 
   await app.listen(port);
-  console.log(`Nexora API running on port ${port}`);
+  console.log(`🚀 Nexora API en http://localhost:${port}/${prefix}`);
 }
-
 bootstrap();

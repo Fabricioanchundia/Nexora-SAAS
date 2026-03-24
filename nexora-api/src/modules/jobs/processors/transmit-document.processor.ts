@@ -1,11 +1,10 @@
-// src/modules/jobs/processors/transmit-document.processor.ts
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
-import { Job, Queue } from 'bull';
-
+import type { Job } from 'bull';
+import type { Queue } from 'bull';
 import { QueueName, JobName } from '../../../common/enums/queue-name.enum';
 import { TaxDocumentStatus } from '../../../common/enums/tax-document-status.enum';
 import { InvoiceStatus } from '../../../common/enums/invoice-status.enum';
@@ -13,11 +12,13 @@ import { TaxDocumentEventType } from '../../tax-documents/entities/tax-document-
 import { TaxDocument } from '../../tax-documents/entities/tax-document.entity';
 import { Invoice } from '../../invoices/entities/invoice.entity';
 import { TaxDocumentsService } from '../../tax-documents/tax-documents.service';
-import { SriIntegrationService, SRI_RECEPTION_STATES, SRI_AUTHORIZATION_STATES } from '../../sri-integration/sri-integration.service';
+import { SriIntegrationService } from '../../sri-integration/sri-integration.service';
 import { StorageService } from '../../storage/storage.service';
 import { EnvironmentType } from '../../../common/enums/environment-type.enum';
 
-export interface TransmitDocumentJobData {
+const MAX_POLLS = 5;
+
+export interface TransmitJobData {
   invoiceId: string;
   taxDocumentId: string;
   companyId: string;
@@ -25,9 +26,6 @@ export interface TransmitDocumentJobData {
   accessKey: string;
   environment: EnvironmentType;
 }
-
-// Máximo de consultas de autorización antes de declarar fallo
-const MAX_AUTHORIZATION_POLLS = 5;
 
 @Processor(QueueName.DOCUMENT_TRANSMISSION)
 export class TransmitDocumentProcessor {
@@ -38,175 +36,133 @@ export class TransmitDocumentProcessor {
     private readonly taxDocRepo: Repository<TaxDocument>,
     @InjectRepository(Invoice)
     private readonly invoiceRepo: Repository<Invoice>,
-    private readonly taxDocumentsService: TaxDocumentsService,
-    private readonly sriService: SriIntegrationService,
-    private readonly storageService: StorageService,
+    private readonly taxDocSvc: TaxDocumentsService,
+    private readonly sriSvc: SriIntegrationService,
+    private readonly storageSvc: StorageService,
     @InjectQueue(QueueName.RIDE_GENERATION)
     private readonly rideQueue: Queue,
   ) {}
 
   @Process(JobName.TRANSMIT_DOCUMENT)
-  async handle(job: Job<TransmitDocumentJobData>): Promise<void> {
+  async handle(job: Job<TransmitJobData>): Promise<void> {
     const { invoiceId, taxDocumentId, signedXmlPath, accessKey, environment } =
       job.data;
+    this.logger.log(
+      `Transmitiendo al SRI: invoice=${invoiceId} intento=${job.attemptsMade + 1}`,
+    );
 
-    this.logger.log(`Transmitiendo al SRI: invoice=${invoiceId}`);
-
-    await this.taxDocumentsService.addEvent(taxDocumentId, {
+    await this.taxDocSvc.addEvent(taxDocumentId, {
       eventType: TaxDocumentEventType.SUBMISSION_STARTED,
       sriStatus: TaxDocumentStatus.SIGNED,
-      metadata: { jobId: job.id, attempt: job.attemptsMade },
+      metadata: { attempt: job.attemptsMade },
     });
 
     try {
-      // 1. Cargar el XML firmado desde storage
-      const signedXmlBuffer = await this.storageService.download(signedXmlPath);
-      const signedXml = signedXmlBuffer.toString('utf-8');
-
-      // 2. Enviar al SRI (recepción)
-      const receptionResult = await this.sriService.submitDocument(
-        signedXml,
+      const xmlBuf = await this.storageSvc.download(signedXmlPath);
+      const result = await this.sriSvc.submitDocument(
+        xmlBuf.toString('utf-8'),
         environment,
       );
 
       await this.taxDocRepo.update(taxDocumentId, {
         submittedAt: new Date(),
-        sriStatus: TaxDocumentStatus.SUBMITTED,
-        sriRawResponse: receptionResult.rawResponse,
+        sriStatus: TaxDocumentStatus.RECEIVED,
+        sriRawResponse: (result as any).rawResponse || result,
       });
+      await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.SUBMITTED });
 
-      await this.invoiceRepo.update(invoiceId, {
-        status: InvoiceStatus.SUBMITTED,
-      });
-
-      // 3. Verificar si fue recibida
-      if (receptionResult.state === SRI_RECEPTION_STATES.REJECTED) {
-        const errors = receptionResult.messages
-          .map((m) => `${m.message}: ${m.additionalInfo}`)
-          .join(' | ');
-
+      // Si el SRI rechazó (DEVUELTA) — error de datos, no reintentar
+      if (result.state === 'DEVUELTA') {
+        const errors = result.messages.map((m: any) => m.message).join(' | ');
         await this.taxDocRepo.update(taxDocumentId, {
           sriStatus: TaxDocumentStatus.REJECTED,
           lastError: errors,
         });
-
-        await this.invoiceRepo.update(invoiceId, {
-          status: InvoiceStatus.REJECTED,
-        });
-
-        await this.taxDocumentsService.addEvent(taxDocumentId, {
+        await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.REJECTED });
+        await this.taxDocSvc.addEvent(taxDocumentId, {
           eventType: TaxDocumentEventType.REJECTED,
           sriStatus: TaxDocumentStatus.REJECTED,
-          rawResponse: receptionResult.rawResponse,
+          rawResponse: result.rawResponse,
           errorDetail: errors,
         });
-
-        // NO re-lanzar — un rechazo del SRI es definitivo (error de datos)
-        return;
+        return; // No lanzar error — rechazo es definitivo
       }
 
-      await this.taxDocumentsService.addEvent(taxDocumentId, {
+      await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.SUBMISSION_COMPLETED,
         sriStatus: TaxDocumentStatus.RECEIVED,
-        rawResponse: receptionResult.rawResponse,
+        rawResponse: result.rawResponse,
       });
-
       await this.taxDocRepo.update(taxDocumentId, {
         sriStatus: TaxDocumentStatus.RECEIVED,
       });
 
-      // 4. Polling de autorización con espera progresiva
+      // Polling de autorización
       await this.pollAuthorization(job.data, 0);
-    } catch (error) {
+    } catch (err) {
       this.logger.error(
-        `Error transmitiendo: invoice=${invoiceId}`,
-        error.stack,
+        `Error transmitiendo invoice=${invoiceId}`,
+        err.stack,
       );
-
-      const isNetworkError =
-        error.message.includes('TIMEOUT') ||
-        error.message.includes('CONNECTION_ERROR');
-
-      const sriStatus = isNetworkError
-        ? TaxDocumentStatus.NOT_RECEIVED
-        : TaxDocumentStatus.RETRY_QUEUED;
-
       await this.taxDocRepo.update(taxDocumentId, {
-        sriStatus,
-        lastError: error.message,
-        retryCount: () => 'retry_count + 1',
+        sriStatus: TaxDocumentStatus.RETRY_QUEUED,
+        lastError: err.message,
       });
-
-      await this.taxDocumentsService.addEvent(taxDocumentId, {
+      await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.SUBMISSION_FAILED,
-        sriStatus,
-        errorDetail: error.message,
+        sriStatus: TaxDocumentStatus.RETRY_QUEUED,
+        errorDetail: err.message,
         metadata: { attempt: job.attemptsMade },
       });
-
-      throw error; // BullMQ gestiona el reintento
+      throw err; // BullMQ gestiona el reintento
     }
   }
 
   private async pollAuthorization(
-    data: TransmitDocumentJobData,
+    data: TransmitJobData,
     attempt: number,
   ): Promise<void> {
     const { invoiceId, taxDocumentId, accessKey, environment } = data;
 
-    if (attempt >= MAX_AUTHORIZATION_POLLS) {
+    if (attempt >= MAX_POLLS) {
       this.logger.warn(
-        `Max polls alcanzado para invoice=${invoiceId}. Dejando en RECEIVED para revisión manual.`,
+        `Max polls alcanzado invoice=${invoiceId}. Quedó en RECEIVED.`,
       );
       return;
     }
 
     // Espera progresiva: 5s, 10s, 20s, 40s, 80s
-    const delay = Math.pow(2, attempt) * 5000;
-    await this.sleep(delay);
+    await this.sleep(Math.pow(2, attempt) * 5000);
 
-    this.logger.log(
-      `Poll autorización ${attempt + 1}/${MAX_AUTHORIZATION_POLLS}: invoice=${invoiceId}`,
-    );
+    const auth = await this.sriSvc.checkAuthorization(accessKey, environment);
 
-    const authResult = await this.sriService.checkAuthorization(
-      accessKey,
-      environment,
-    );
-
-    await this.taxDocumentsService.addEvent(taxDocumentId, {
+    await this.taxDocSvc.addEvent(taxDocumentId, {
       eventType: TaxDocumentEventType.STATUS_CHECKED,
       sriStatus: TaxDocumentStatus.IN_PROCESS,
-      rawResponse: authResult.rawResponse,
+      rawResponse: auth.rawResponse,
       metadata: { pollAttempt: attempt + 1 },
     });
 
-    if (authResult.state === SRI_AUTHORIZATION_STATES.IN_PROCESS) {
-      // Todavía procesando — reintentar
+    if (auth.state === 'EN PROCESO') {
       return this.pollAuthorization(data, attempt + 1);
     }
 
-    if (authResult.state === SRI_AUTHORIZATION_STATES.AUTHORIZED) {
-      // Autorizado
+    if (auth.state === 'AUTORIZADO') {
       await this.taxDocRepo.update(taxDocumentId, {
         sriStatus: TaxDocumentStatus.AUTHORIZED,
-        authorizationNumber: authResult.authorizationNumber,
-        authorizedAt: authResult.authorizedAt ?? new Date(),
-        sriRawResponse: authResult.rawResponse,
+        authorizationNumber: auth.authorizationNumber || undefined,
+        authorizedAt: auth.authorizedAt ? new Date(auth.authorizedAt) : new Date(),
+        sriRawResponse: (auth as any).rawResponse || auth,
       });
-
       await this.invoiceRepo.update(invoiceId, {
         status: InvoiceStatus.AUTHORIZED,
       });
-
-      await this.taxDocumentsService.addEvent(taxDocumentId, {
+      await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.AUTHORIZED,
         sriStatus: TaxDocumentStatus.AUTHORIZED,
-        rawResponse: authResult.rawResponse,
-        metadata: { authorizationNumber: authResult.authorizationNumber },
+        rawResponse: auth.rawResponse,
+        metadata: { authorizationNumber: auth.authorizationNumber },
       });
-
-      // Encolar generación del RIDE
       await this.rideQueue.add(
         JobName.GENERATE_RIDE,
         { invoiceId, taxDocumentId, companyId: data.companyId },
@@ -217,34 +173,25 @@ export class TransmitDocumentProcessor {
           removeOnFail: false,
         },
       );
-
       return;
     }
 
-    // No autorizado con error
-    const errors = authResult.messages
-      .map((m) => `${m.message}: ${m.additionalInfo}`)
-      .join(' | ');
-
+    // No autorizado
+    const errors = auth.messages.map((m: any) => m.message).join(' | ');
     await this.taxDocRepo.update(taxDocumentId, {
       sriStatus: TaxDocumentStatus.REJECTED,
       lastError: errors,
-      sriRawResponse: authResult.rawResponse,
     });
-
-    await this.invoiceRepo.update(invoiceId, {
-      status: InvoiceStatus.REJECTED,
-    });
-
-    await this.taxDocumentsService.addEvent(taxDocumentId, {
+    await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.REJECTED });
+    await this.taxDocSvc.addEvent(taxDocumentId, {
       eventType: TaxDocumentEventType.REJECTED,
       sriStatus: TaxDocumentStatus.REJECTED,
-      rawResponse: authResult.rawResponse,
+      rawResponse: auth.rawResponse,
       errorDetail: errors,
     });
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((r) => setTimeout(r, ms));
   }
 }

@@ -12,3 +12,11 @@ export enum IvaRate {
   EXENTO = '6',    // exento de IVA
   NO_OBJETO = '7', // no objeto de IVA
 }
+
+export const IVA_PERCENTAGES: Record<string, number> = {
+    '0': 0,
+    '2': 0.12,
+    '3': 0.15,
+    '6': 0,
+    '7': 0,
+};

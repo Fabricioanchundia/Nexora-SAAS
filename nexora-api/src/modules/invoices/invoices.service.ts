@@ -1,323 +1,287 @@
-// src/modules/invoices/invoices.service.ts
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
+import type { Queue } from 'bull';
 import Decimal from 'decimal.js';
-
 import { Invoice } from './entities/invoice.entity';
 import { InvoiceItem } from './entities/invoice-item.entity';
 import { TaxDocument } from '../tax-documents/entities/tax-document.entity';
-import {
-  TaxDocumentEvent,
-  TaxDocumentEventType,
-} from '../tax-documents/entities/tax-document-event.entity';
+import { TaxDocumentEvent, TaxDocumentEventType } from '../tax-documents/entities/tax-document-event.entity';
 import { Company } from '../companies/entities/company.entity';
 import { Customer } from '../customers/entities/customer.entity';
-import { User } from '../users/entities/user.entity';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 import { TaxDocumentStatus } from '../../common/enums/tax-document-status.enum';
 import { QueueName, JobName } from '../../common/enums/queue-name.enum';
-import { IvaRate } from '../../common/enums/tax-code.enum';
-import { PaginationDto, PaginatedResult } from '../../common/dto/pagination.dto';
-import { AccessKeyService } from '../tax-documents/access-key.service';
-
-// ⚠️ PENDIENTE DE PARAMETRIZACIÓN
-// Las tasas de IVA deben verificarse contra la resolución vigente del SRI
-// antes de usar en producción
-const IVA_RATES: Record<IvaRate, number> = {
-  [IvaRate.CERO]: 0,
-  [IvaRate.DOCE]: 0.12,    // Verificar tarifa vigente con SRI
-  [IvaRate.QUINCE]: 0.15,  // Verificar si aplica
-  [IvaRate.EXENTO]: 0,
-  [IvaRate.NO_OBJETO]: 0,
-};
+import { IVA_PERCENTAGES } from '../../common/enums/tax-code.enum';
+import { User } from '../users/entities/user.entity';
+import { formatDateKey } from '../../common/utils/date.util';
 
 @Injectable()
 export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
 
   constructor(
-    @InjectRepository(Invoice)
-    private readonly invoiceRepo: Repository<Invoice>,
-    @InjectRepository(InvoiceItem)
-    private readonly itemRepo: Repository<InvoiceItem>,
-    @InjectRepository(Company)
-    private readonly companyRepo: Repository<Company>,
-    @InjectRepository(Customer)
-    private readonly customerRepo: Repository<Customer>,
+    @InjectRepository(Invoice) private readonly invoiceRepo: Repository<Invoice>,
+    @InjectRepository(InvoiceItem) private readonly itemRepo: Repository<InvoiceItem>,
+    @InjectRepository(Company) private readonly companyRepo: Repository<Company>,
+    @InjectRepository(Customer) private readonly customerRepo: Repository<Customer>,
+    @InjectRepository(TaxDocument) private readonly taxDocRepo: Repository<TaxDocument>,
+    @InjectRepository(TaxDocumentEvent) private readonly eventRepo: Repository<TaxDocumentEvent>,
     private readonly dataSource: DataSource,
     private readonly auditLogsService: AuditLogsService,
-    private readonly accessKeyService: AccessKeyService,
-    @InjectQueue(QueueName.DOCUMENT_SIGNING)
-    private readonly signingQueue: Queue,
+    @InjectQueue(QueueName.DOCUMENT_SIGNING) private readonly signingQueue: Queue,
   ) {}
 
-  async create(
-    dto: CreateInvoiceDto,
-    companyId: string,
-    user: User,
-  ): Promise<Invoice> {
-    // Validar empresa
-    const company = await this.companyRepo.findOne({
-      where: { id: companyId, isActive: true },
-    });
+  async create(dto: CreateInvoiceDto, companyId: string, user: User): Promise<Invoice> {
+    const company = await this.companyRepo.findOne({ where: { id: companyId, isActive: true } });
     if (!company) throw new NotFoundException('Empresa no encontrada');
 
-    // Validar certificado activo
-    // La validación real del .p12 ocurre en el worker de firma
-    // Aquí solo verificamos que exista uno registrado
-    if (!company) throw new BadRequestException('Empresa inválida');
-
-    // Validar cliente
     const customer = await this.customerRepo.findOne({
       where: { id: dto.customerId, companyId, isActive: true },
     });
     if (!customer) throw new NotFoundException('Cliente no encontrado');
 
-    // Calcular totales ANTES de abrir la transacción
-    const calculated = this.calculateTotals(dto.items);
-
-    // Toda la operación es atómica
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const totals = this.calcTotals(dto.items);
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
 
     try {
-      // 1. Obtener y reservar el número secuencial (SELECT FOR UPDATE)
-      const companyLocked = await queryRunner.manager
+      // Secuencial atómico — SELECT FOR UPDATE
+      const locked = await qr.manager
         .createQueryBuilder(Company, 'c')
         .setLock('pessimistic_write')
         .where('c.id = :id', { id: companyId })
         .getOne();
 
-      const sequential = this.formatSequential(
-        companyLocked.establishmentCode,
-        companyLocked.emissionPoint,
-        companyLocked.nextSequential,
+      if (!locked) throw new NotFoundException('Empresa no encontrada para generar secuencial');
+
+      const sequential = `${locked.establishmentCode}-${locked.emissionPoint}-${String(locked.nextSequential).padStart(9, '0')}`;
+      await qr.manager.update(Company, companyId, {
+        nextSequential: locked.nextSequential + 1,
+      });
+
+      // ⚠️ Clave de acceso — verificar algoritmo con ficha técnica SRI
+      const accessKey = this.buildAccessKey(
+        new Date(dto.issueDate), '01',
+        company.ruc, company.sriEnvironment,
+        sequential, company.emissionType,
       );
 
-      // Incrementar secuencial
-      await queryRunner.manager.update(Company, companyId, {
-        nextSequential: companyLocked.nextSequential + 1,
-      });
-
-      // 2. Crear la factura
-      const invoice = queryRunner.manager.create(Invoice, {
-        companyId,
-        customerId: dto.customerId,
-        userId: user.id,
-        sequential,
-        issueDate: new Date(dto.issueDate),
-        subtotalNoTax: calculated.subtotalNoTax,
-        subtotalTaxable: calculated.subtotalTaxable,
-        discountTotal: calculated.discountTotal,
-        taxAmount: calculated.taxAmount,
-        total: calculated.total,
-        status: InvoiceStatus.PENDING,
-        notes: dto.notes,
-      });
-
-      const savedInvoice = await queryRunner.manager.save(Invoice, invoice);
-
-      // 3. Crear los ítems (snapshot inmutable del precio/producto)
-      const items = dto.items.map((itemDto) =>
-        queryRunner.manager.create(InvoiceItem, {
-          invoiceId: savedInvoice.id,
-          productId: itemDto.productId,
-          productCode: itemDto.productCode,
-          description: itemDto.description,
-          quantity: itemDto.quantity,
-          unitPrice: itemDto.unitPrice,
-          discount: itemDto.discount ?? 0,
-          subtotal: this.calculateItemSubtotal(itemDto),
-          ivaRate: itemDto.ivaRate,
-          taxCode: itemDto.taxCode,
-          taxAmount: this.calculateItemTax(itemDto),
+      const invoice = await qr.manager.save(
+        Invoice,
+        qr.manager.create(Invoice, {
+          companyId, customerId: dto.customerId, userId: user.id,
+          sequential, accessKey, issueDate: new Date(dto.issueDate),
+          ...totals, status: InvoiceStatus.PENDING, notes: dto.notes,
         }),
       );
-      await queryRunner.manager.save(InvoiceItem, items);
 
-      // 4. Generar la clave de acceso
-      // ⚠️ PENDIENTE DE PARAMETRIZACIÓN — algoritmo según ficha técnica SRI
-      const accessKey = this.accessKeyService.generate({
-        issueDate: new Date(dto.issueDate),
-        documentType: '01', // factura — verificar código en ficha técnica
-        ruc: company.ruc,
-        environment: company.sriEnvironment,
-        sequential,
-        emissionType: company.emissionType,
-      });
+      const items = dto.items.map((i) =>
+        qr.manager.create(InvoiceItem, {
+          invoiceId: invoice.id,
+          productId: i.productId,
+          productCode: i.productCode,
+          description: i.description,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          discount: i.discount ?? 0,
+          subtotal: this.itemSub(i),
+          ivaRate: i.ivaRate,
+          taxCode: i.taxCode,
+          taxAmount: this.itemTax(i),
+        }),
+      );
+      await qr.manager.save(InvoiceItem, items);
 
-      // Actualizar la factura con la clave de acceso
-      await queryRunner.manager.update(Invoice, savedInvoice.id, { accessKey });
-
-      // 5. Crear el documento tributario asociado
-      const taxDocument = queryRunner.manager.create(TaxDocument, {
-        invoiceId: savedInvoice.id,
-        accessKey,
-        sriStatus: TaxDocumentStatus.PENDING_SIGN,
-        retryCount: 0,
-      });
-      const savedTaxDoc = await queryRunner.manager.save(TaxDocument, taxDocument);
-
-      // 6. Registrar evento inicial
-      const event = queryRunner.manager.create(TaxDocumentEvent, {
-        taxDocumentId: savedTaxDoc.id,
-        eventType: TaxDocumentEventType.CREATED,
-        sriStatus: TaxDocumentStatus.PENDING_SIGN,
-        metadata: {
-          invoiceId: savedInvoice.id,
-          sequential,
+      const taxDoc = await qr.manager.save(
+        TaxDocument,
+        qr.manager.create(TaxDocument, {
+          invoiceId: invoice.id,
           accessKey,
-          userId: user.id,
-        },
-      });
-      await queryRunner.manager.save(TaxDocumentEvent, event);
+          sriStatus: TaxDocumentStatus.PENDING_SIGN,
+          retryCount: 0,
+        }),
+      );
 
-      await queryRunner.commitTransaction();
+      await qr.manager.save(
+        TaxDocumentEvent,
+        qr.manager.create(TaxDocumentEvent, {
+          taxDocumentId: taxDoc.id,
+          eventType: TaxDocumentEventType.CREATED,
+          sriStatus: TaxDocumentStatus.PENDING_SIGN,
+          metadata: { invoiceId: invoice.id, sequential, accessKey },
+        }),
+      );
 
-      // 7. Encolar el trabajo de firma DESPUÉS del commit
-      // Si el encolado falla, la factura queda en PENDING y se puede reintentar
+      await qr.commitTransaction();
+
+      // Encolar DESPUÉS del commit para garantizar consistencia
       await this.signingQueue.add(
         JobName.SIGN_DOCUMENT,
-        {
-          invoiceId: savedInvoice.id,
-          taxDocumentId: savedTaxDoc.id,
-          companyId,
-        },
+        { invoiceId: invoice.id, taxDocumentId: taxDoc.id, companyId },
         {
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
-          removeOnComplete: false, // conservar para auditoría
+          removeOnComplete: false,
           removeOnFail: false,
         },
       );
 
-      // 8. Auditoría
-      await this.auditLogsService.log({
-        companyId,
-        userId: user.id,
-        entityType: 'Invoice',
-        entityId: savedInvoice.id,
-        action: 'CREATE',
-        metadata: { sequential, accessKey, total: calculated.total },
-      });
+      this.auditLogsService
+        .log({
+          companyId, userId: user.id, entityType: 'Invoice',
+          entityId: invoice.id, action: 'CREATE',
+          metadata: { sequential, total: totals.total },
+        })
+        .catch(() => {});
 
-      return await this.findOne(savedInvoice.id, companyId);
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      this.logger.error(
-        `Error creando factura para empresa ${companyId}`,
-        error.stack,
-      );
-      throw error;
+      return this.findOne(invoice.id, companyId);
+    } catch (err) {
+      await qr.rollbackTransaction();
+      this.logger.error(`Error creando factura empresa=${companyId}`, err.stack);
+      throw err;
     } finally {
-      await queryRunner.release();
+      await qr.release();
     }
   }
 
-  async findAll(
-    companyId: string,
-    pagination: PaginationDto,
-  ): Promise<PaginatedResult<Invoice>> {
+  async findAll(companyId: string, page = 1, limit = 20): Promise<{
+    data: Invoice[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
     const [data, total] = await this.invoiceRepo.findAndCount({
       where: { companyId },
       relations: ['customer', 'taxDocument'],
       order: { createdAt: 'DESC' },
-      skip: pagination.skip,
-      take: pagination.limit,
+      skip: (page - 1) * limit,
+      take: limit,
     });
-
-    return {
-      data,
-      total,
-      page: pagination.page,
-      limit: pagination.limit,
-      totalPages: Math.ceil(total / pagination.limit),
-    };
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findOne(id: string, companyId: string): Promise<Invoice> {
-    const invoice = await this.invoiceRepo.findOne({
+    const inv = await this.invoiceRepo.findOne({
       where: { id, companyId },
       relations: ['customer', 'items', 'taxDocument', 'taxDocument.events', 'user'],
     });
-    if (!invoice) throw new NotFoundException('Factura no encontrada');
-    return invoice;
+    if (!inv) throw new NotFoundException('Factura no encontrada');
+    return inv;
   }
 
-  // ─── Cálculos de totales ─────────────────────────────────────────────────────
-
-  private calculateTotals(items: CreateInvoiceDto['items']) {
-    // Usar Decimal.js para evitar errores de precisión de flotantes
-    let subtotalNoTax = new Decimal(0);
-    let subtotalTaxable = new Decimal(0);
-    let discountTotal = new Decimal(0);
-    let taxAmount = new Decimal(0);
-
-    for (const item of items) {
-      const qty = new Decimal(item.quantity);
-      const price = new Decimal(item.unitPrice);
-      const discount = new Decimal(item.discount ?? 0);
-      const subtotal = qty.mul(price).minus(discount);
-      const rate = new Decimal(IVA_RATES[item.ivaRate] ?? 0);
-      const tax = subtotal.mul(rate);
-
-      discountTotal = discountTotal.plus(discount);
-
-      if (rate.isZero()) {
-        subtotalNoTax = subtotalNoTax.plus(subtotal);
-      } else {
-        subtotalTaxable = subtotalTaxable.plus(subtotal);
-      }
-
-      taxAmount = taxAmount.plus(tax);
-    }
-
-    const total = subtotalNoTax.plus(subtotalTaxable).plus(taxAmount);
-
+  async getTimeline(id: string, companyId: string): Promise<{
+    invoiceStatus: InvoiceStatus;
+    taxDocument: {
+      id: string | null;
+      accessKey: string | null;
+      sriStatus: TaxDocumentStatus | null;
+      authorizationNumber: string | null;
+      authorizedAt: Date | null;
+      retryCount: number | null;
+      lastError: string | null;
+    };
+    timeline: Array<{
+      id: string;
+      eventType: TaxDocumentEventType;
+      sriStatus: TaxDocumentStatus;
+      errorDetail: string | null;
+      metadata: any;
+      createdAt: Date;
+    }>;
+  }> {
+    const inv = await this.findOne(id, companyId);
     return {
-      subtotalNoTax: subtotalNoTax.toDecimalPlaces(2).toNumber(),
-      subtotalTaxable: subtotalTaxable.toDecimalPlaces(2).toNumber(),
-      discountTotal: discountTotal.toDecimalPlaces(2).toNumber(),
-      taxAmount: taxAmount.toDecimalPlaces(2).toNumber(),
-      total: total.toDecimalPlaces(2).toNumber(),
+      invoiceStatus: inv.status,
+      taxDocument: {
+        id: inv.taxDocument?.id || null,
+        accessKey: inv.taxDocument?.accessKey || null,
+        sriStatus: inv.taxDocument?.sriStatus || null,
+        authorizationNumber: inv.taxDocument?.authorizationNumber || null,
+        authorizedAt: inv.taxDocument?.authorizedAt || null,
+        retryCount: inv.taxDocument?.retryCount || null,
+        lastError: inv.taxDocument?.lastError || null,
+      },
+      timeline: (inv.taxDocument?.events || []).map((e) => ({
+        id: e.id,
+        eventType: e.eventType,
+        sriStatus: e.sriStatus,
+        errorDetail: e.errorDetail,
+        metadata: e.metadata,
+        createdAt: e.createdAt,
+      })),
     };
   }
 
-  private calculateItemSubtotal(item: any): number {
-    return new Decimal(item.quantity)
-      .mul(item.unitPrice)
-      .minus(item.discount ?? 0)
+  // ─── Cálculos de totales ────────────────────────────────────────────────────
+  private calcTotals(items: CreateInvoiceDto['items']) {
+    let noTax = new Decimal(0);
+    let taxable = new Decimal(0);
+    let disc = new Decimal(0);
+    let tax = new Decimal(0);
+
+    for (const i of items) {
+      const sub = new Decimal(i.quantity).mul(i.unitPrice).minus(i.discount ?? 0);
+      const rate = new Decimal(IVA_PERCENTAGES[i.ivaRate] ?? 0);
+      disc = disc.plus(i.discount ?? 0);
+      if (rate.isZero()) noTax = noTax.plus(sub);
+      else taxable = taxable.plus(sub);
+      tax = tax.plus(sub.mul(rate));
+    }
+
+    return {
+      subtotalNoTax: noTax.toDecimalPlaces(2).toNumber(),
+      subtotalTaxable: taxable.toDecimalPlaces(2).toNumber(),
+      discountTotal: disc.toDecimalPlaces(2).toNumber(),
+      taxAmount: tax.toDecimalPlaces(2).toNumber(),
+      total: noTax.plus(taxable).plus(tax).toDecimalPlaces(2).toNumber(),
+    };
+  }
+
+  private itemSub(i: CreateInvoiceDto['items'][number]): number {
+    return new Decimal(i.quantity)
+      .mul(i.unitPrice)
+      .minus(i.discount ?? 0)
       .toDecimalPlaces(2)
       .toNumber();
   }
 
-  private calculateItemTax(item: any): number {
-    const subtotal = new Decimal(item.quantity)
-      .mul(item.unitPrice)
-      .minus(item.discount ?? 0);
-    const rate = new Decimal(IVA_RATES[item.ivaRate] ?? 0);
-    return subtotal.mul(rate).toDecimalPlaces(2).toNumber();
+  private itemTax(i: CreateInvoiceDto['items'][number]): number {
+    return new Decimal(this.itemSub(i))
+      .mul(IVA_PERCENTAGES[i.ivaRate] ?? 0)
+      .toDecimalPlaces(2)
+      .toNumber();
   }
 
-  // ─── Formato del número secuencial ──────────────────────────────────────────
-  // ⚠️ PENDIENTE DE PARAMETRIZACIÓN — formato según ficha técnica SRI vigente
-  // Formato esperado: 001-001-000000001
-  private formatSequential(
-    establishment: string,
-    emissionPoint: string,
-    sequence: number,
+  // ⚠️ PENDIENTE — verificar algoritmo módulo 11 con ficha técnica SRI vigente
+  private buildAccessKey(
+    date: Date, docType: string, ruc: string,
+    env: string, seq: string, emType: string,
   ): string {
-    return `${establishment}-${emissionPoint}-${String(sequence).padStart(9, '0')}`;
+    const dateKey = formatDateKey(date);
+    const clean = seq.replace(/-/g, '');
+    const serie = clean.substring(0, 6);
+    const numero = clean.substring(6);
+    const codigo = String(Math.floor(Math.random() * 99999999)).padStart(8, '0');
+    const partial = `${dateKey}${docType}${ruc}${env}${serie}${numero}${codigo}${emType}`;
+    return partial + this.mod11(partial);
+  }
+
+  private mod11(k: string): string {
+    const w = [2, 3, 4, 5, 6, 7];
+    let s = 0;
+    let wi = 0;
+    for (let i = k.length - 1; i >= 0; i--) {
+      s += parseInt(k[i], 10) * w[wi++ % w.length];
+    }
+    const r = 11 - (s % 11);
+    if (r === 11) return '0';
+    if (r === 10) return '1';
+    return String(r);
   }
 }

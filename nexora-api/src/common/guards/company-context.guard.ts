@@ -1,38 +1,37 @@
 import {
-  Injectable,
-  CanActivate,
-  ExecutionContext,
-  BadRequestException,
+    BadRequestException, CanActivate, ExecutionContext,
+    ForbiddenException, Injectable,
 } from '@nestjs/common';
-import { CompaniesService } from '../../modules/companies/companies.service';
-
-// Este guard:
-// 1. Lee el header 'x-company-id'
-// 2. Verifica que el usuario tiene acceso a esa empresa
-// 3. Inyecta la empresa en request.company
-// Usar junto con JwtAuthGuard en rutas que requieren contexto de empresa
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { CompanyUser } from '../../modules/companies/entities/company-user.entity';
 
 @Injectable()
 export class CompanyContextGuard implements CanActivate {
-  constructor(private readonly companiesService: CompaniesService) {}
+    constructor(
+    @InjectRepository(CompanyUser)
+    private readonly cuRepo: Repository<CompanyUser>,
+    ) {}
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const user = request.user;
-    const companyId = request.headers['x-company-id'];
+    async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const req = ctx.switchToHttp().getRequest();
+    const user = req.user;
+    const companyId = req.headers['x-company-id'];
 
     if (!companyId) {
-      throw new BadRequestException(
-        'Header x-company-id es requerido para esta operación',
-      );
+        throw new BadRequestException('El header x-company-id es requerido');
     }
 
-    const company = await this.companiesService.findOne(
-      companyId,
-      user.id,
-    );
+    const cu = await this.cuRepo.findOne({
+        where: { userId: user.id, companyId, isActive: true },
+        relations: ['company'],
+    });
 
-    request.company = company;
+    if (!cu || !cu.company || !cu.company.isActive) {
+        throw new ForbiddenException('No tienes acceso a esta empresa');
+    }
+
+    req.company = cu.company;
     return true;
-  }
+    }
 }

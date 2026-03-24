@@ -1,32 +1,32 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../../users/users.service';
 
 export interface JwtPayload {
-  sub: string;   // user id
-  email: string;
+    sub: string;
+    email: string;
 }
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(
+    constructor(
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
-  ) {
+    ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false,
-      secretOrKey: configService.get<string>('jwt.secret'),
+        jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+        ignoreExpiration: false,
+        secretOrKey: configService.get<string>('jwt.secret') || 'dev-secret-change-in-production',
     });
-  }
+    }
 
-  async validate(payload: JwtPayload) {
+    async validate(payload: JwtPayload) {
     const user = await this.usersService.findById(payload.sub);
     if (!user || !user.isActive) {
-      throw new UnauthorizedException('Usuario no encontrado o inactivo');
+        throw new UnauthorizedException('Usuario no encontrado o inactivo');
     }
     return user;
-  }
+    }
 }

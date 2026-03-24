@@ -6,5 +6,6 @@ export default registerAs('app', () => ({
   name: process.env.APP_NAME || 'Nexora API',
   nodeEnv: process.env.NODE_ENV || 'development',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3001',
-  certificateEncryptionKey: process.env.CERTIFICATE_ENCRYPTION_KEY,
+  certificateEncryptionKey:
+    process.env.CERTIFICATE_ENCRYPTION_KEY || 'nexora-dev-key-minimo-32-caracteres!!',
 }));
