@@ -1,10 +1,11 @@
+// src/modules/jobs/processors/sign-document.processor.ts
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
-import type { Job } from 'bull';
-import type { Queue } from 'bull';
+import type { Job, Queue } from 'bull';
+
 import { QueueName, JobName } from '../../../common/enums/queue-name.enum';
 import { TaxDocumentStatus } from '../../../common/enums/tax-document-status.enum';
 import { InvoiceStatus } from '../../../common/enums/invoice-status.enum';
@@ -16,6 +17,14 @@ import { XmlGenerationService } from '../../xml-generation/xml-generation.servic
 import { SigningService } from '../../signing/signing.service';
 import { CertificatesService } from '../../certificates/certificates.service';
 import { StorageService } from '../../storage/storage.service';
+import { InvoiceStateMachine } from '../../../common/states/invoice-state.machine';
+import {
+  isRetryable,
+  toErrorMessage,
+  CertificateExpiredError,
+  CertificateInvalidError,
+  SigningError,
+} from '../../../common/errors/nexora.errors';
 
 export interface SignDocumentJobData {
   invoiceId: string;
@@ -41,85 +50,153 @@ export class SignDocumentProcessor {
     private readonly txQueue: Queue,
   ) {}
 
-  @Process(JobName.SIGN_DOCUMENT)
+  @Process({ name: JobName.SIGN_DOCUMENT, concurrency: 5 })
   async handle(job: Job<SignDocumentJobData>): Promise<void> {
     const { invoiceId, taxDocumentId, companyId } = job.data;
+
     this.logger.log(
-      `Firmando: invoice=${invoiceId} intento=${job.attemptsMade + 1}`,
+      `[FIRMA] Iniciando: invoice=${invoiceId} intento=${job.attemptsMade + 1}`,
     );
 
-    await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.PROCESSING });
+    // Marcar como en proceso
+    await this.invoiceRepo.update(invoiceId, {
+      status: InvoiceStatus.PROCESSING,
+    });
+
     await this.taxDocSvc.addEvent(taxDocumentId, {
       eventType: TaxDocumentEventType.SIGN_STARTED,
       sriStatus: TaxDocumentStatus.PENDING_SIGN,
-      metadata: { jobId: String(job.id), attempt: job.attemptsMade },
+      metadata: {
+        jobId: String(job.id),
+        attempt: job.attemptsMade,
+        queue: QueueName.DOCUMENT_SIGNING,
+      },
     });
 
     try {
+      // ─── Cargar la factura completa ──────────────────────────────────────
       const invoice = await this.invoiceRepo.findOne({
         where: { id: invoiceId },
         relations: ['company', 'customer', 'items'],
       });
-      if (!invoice) throw new Error(`Factura ${invoiceId} no encontrada`);
 
-      // 1. Generar XML
+      if (!invoice) {
+        // Error no reintentable — la factura no existe
+        throw new SigningError(`Factura ${invoiceId} no encontrada en BD`);
+      }
+
+      if (!invoice.company || !invoice.customer || !invoice.items?.length) {
+        throw new SigningError(
+          `Factura ${invoiceId} incompleta: falta company, customer o items`,
+        );
+      }
+
+      // ─── Generar XML ─────────────────────────────────────────────────────
       const xmlString = await this.xmlSvc.generateInvoiceXml(invoice);
+
       const now = new Date();
-      const prefix = `${companyId}/xml/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const xmlPath = `${prefix}/${invoice.accessKey}.xml`;
+      const yearMonth = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const xmlPath = `${companyId}/xml/${yearMonth}/${invoice.accessKey}.xml`;
+
       await this.storageSvc.upload(xmlPath, Buffer.from(xmlString, 'utf-8'));
       await this.taxDocRepo.update(taxDocumentId, { xmlPath });
 
-      // 2. Firmar con .p12
-      const { buffer: p12, passphrase } =
+      this.logger.debug(`XML generado y guardado: ${xmlPath}`);
+
+      // ─── Cargar certificado y firmar ──────────────────────────────────────
+      const { buffer: p12Buffer, passphrase } =
         await this.certSvc.getCertForSigning(companyId);
-      const signedXml = await this.signSvc.signXml(xmlString, p12, passphrase);
-      const signedPath = `${prefix}/${invoice.accessKey}-signed.xml`;
-      await this.storageSvc.upload(signedPath, Buffer.from(signedXml, 'utf-8'));
 
-      // 3. Actualizar estado
-      await this.taxDocRepo.update(taxDocumentId, {
-        signedXmlPath: signedPath,
-        sriStatus: TaxDocumentStatus.SIGNED,
-      });
-      await this.taxDocSvc.addEvent(taxDocumentId, {
-        eventType: TaxDocumentEventType.SIGN_COMPLETED,
-        sriStatus: TaxDocumentStatus.SIGNED,
-        metadata: { xmlPath, signedPath },
+      const signedXml = await this.signSvc.signXml(
+        xmlString,
+        p12Buffer,
+        passphrase,
+        companyId,
+      );
+
+      const signedPath = `${companyId}/xml/${yearMonth}/${invoice.accessKey}-signed.xml`;
+      await this.storageSvc.upload(
+        signedPath,
+        Buffer.from(signedXml, 'utf-8'),
+      );
+
+      this.logger.debug(`XML firmado guardado: ${signedPath}`);
+
+      // ─── Transición de estado validada ───────────────────────────────────
+      await this.taxDocSvc.transition({
+        taxDocumentId,
+        toStatus: TaxDocumentStatus.SIGNED,
+        updates: { signedXmlPath: signedPath },
+        event: {
+          eventType: TaxDocumentEventType.SIGN_COMPLETED,
+          metadata: { xmlPath, signedPath },
+        },
       });
 
-      // 4. Encolar transmisión
+      // ─── Encolar transmisión ──────────────────────────────────────────────
       await this.txQueue.add(
         JobName.TRANSMIT_DOCUMENT,
         {
-          invoiceId, taxDocumentId, companyId,
+          invoiceId,
+          taxDocumentId,
+          companyId,
           signedXmlPath: signedPath,
           accessKey: invoice.accessKey,
           environment: invoice.company.sriEnvironment,
         },
         {
+          jobId: `transmit-${invoiceId}`, // idempotente
+          delay: 1000,
           attempts: 5,
-          backoff: { type: 'exponential', delay: 10000 },
-          delay: 2000,
+          backoff: { type: 'exponential', delay: 10_000 },
           removeOnComplete: false,
           removeOnFail: false,
         },
       );
 
-      this.logger.log(`Firma completada: invoice=${invoiceId}`);
+      this.logger.log(`[FIRMA] Completada: invoice=${invoiceId}`);
     } catch (err) {
-      this.logger.error(`Error firmando invoice=${invoiceId}`, err.stack);
-      await this.taxDocRepo.update(taxDocumentId, {
-        sriStatus: TaxDocumentStatus.PENDING_SIGN,
-        lastError: err.message,
-      });
+      const message = toErrorMessage(err);
+      const shouldRetry = isRetryable(err);
+
+      this.logger.error(
+        `[FIRMA] Error invoice=${invoiceId} reintentable=${shouldRetry}: ${message}`,
+      );
+
+      // Errores de certificado no son reintentables
+      const isCertError =
+        err instanceof CertificateExpiredError ||
+        err instanceof CertificateInvalidError;
+
       await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.SIGN_FAILED,
         sriStatus: TaxDocumentStatus.PENDING_SIGN,
-        errorDetail: err.message,
-        metadata: { attempt: job.attemptsMade },
+        errorDetail: message,
+        metadata: {
+          attempt: job.attemptsMade,
+          retryable: shouldRetry,
+          errorType: isCertError ? 'CERTIFICATE' : 'SIGNING',
+        },
       });
-      await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.ERROR });
+
+      await this.taxDocRepo.update(taxDocumentId, {
+        lastError: message,
+      });
+
+      // Si es un error de certificado, marcar como ERROR definitivo
+      if (isCertError) {
+        await this.invoiceRepo.update(invoiceId, {
+          status: InvoiceStatus.ERROR,
+        });
+        // NO re-lanzar — BullMQ no reintentará
+        return;
+      }
+
+      await this.invoiceRepo.update(invoiceId, {
+        status: InvoiceStatus.ERROR,
+      });
+
+      // Re-lanzar para que BullMQ gestione el reintento
       throw err;
     }
   }

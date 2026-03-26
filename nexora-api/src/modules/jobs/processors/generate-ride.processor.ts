@@ -68,7 +68,7 @@ export class GenerateRideProcessor {
       });
 
       // Notificar al cliente si tiene email
-      if (invoice.customer?.email) {
+      if (invoice.customer?.email && invoice.sequential) {
         const xmlBuf = invoice.taxDocument.signedXmlPath
           ? await this.storageSvc.download(invoice.taxDocument.signedXmlPath)
           : Buffer.alloc(0);
