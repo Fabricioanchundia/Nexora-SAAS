@@ -1,127 +1,197 @@
+// CAMBIO CRÍTICO v3:
+// - SriStatus.AUTHORIZED es TERMINAL FISCAL — sin transiciones salientes
+// - PostStatus es independiente — sus fallos no tocan sriStatus
+// - RecoveryStrategy por estado con máximos diferenciados
+// - Separación clara: qué reintentar automáticamente vs qué mandar a revisión humana
+
 import { BadRequestException } from '@nestjs/common';
 import { InvoiceStatus } from '../enums/invoice-status.enum';
-import { TaxDocumentStatus } from '../enums/tax-document-status.enum';
+import { SriStatus, PostStatus } from '../enums/tax-document-status.enum';
 
-// ─── Categorías de estados ────────────────────────────────────────────────────
-//
-// TERMINAL EXITOSO    → proceso completado, no se toca más
-// TERMINAL DEFINITIVO → falló sin posibilidad de reintento automático
-//                       (requiere intervención humana o anulación)
-// REINTENTABLE        → puede volver a intentarse automáticamente
-
+// ─── Estrategia de recovery ───────────────────────────────────────────────────
 export type RecoveryStrategy =
-  | 'NONE'           // no aplica (estado normal en flujo)
-  | 'AUTO_RETRY'     // job de recovery lo reencola automáticamente
-  | 'MANUAL_REVIEW'  // requiere que un humano lo revise y decida
-  | 'TERMINAL';      // estado final, no hacer nada
+  | 'AUTO_RETRY'      // sistema reintenta automáticamente
+  | 'MANUAL_REVIEW'   // requiere que un humano revise antes de reintentar
+  | 'TERMINAL';       // estado final, no se toca
 
-// ─── Transiciones válidas para Invoice ───────────────────────────────────────
+// Máximo de reintentos automáticos POR ESTADO
+// Diferenciados porque no todos los fallos son iguales
+export const SRI_MAX_RETRIES: Record<SriStatus, number> = {
+  [SriStatus.PENDING_SIGN]:  3,   // máx 3 intentos de firma
+  [SriStatus.SIGNED]:        5,   // máx 5 intentos de transmisión
+  [SriStatus.SUBMITTED]:     10,  // máx 10 polls de autorización
+  [SriStatus.RECEIVED]:      10,  // igual que SUBMITTED
+  [SriStatus.IN_PROCESS]:    10,  // en proceso = sigue esperando
+  [SriStatus.AUTHORIZED]:    0,   // terminal, no reintenta
+  [SriStatus.REJECTED]:      0,   // rechazo del SRI = revisión manual
+  [SriStatus.NOT_RECEIVED]:  3,   // error de red = pocos reintentos
+};
+
+export const POST_MAX_RETRIES: Record<PostStatus, number> = {
+  [PostStatus.PENDING_RIDE]:    3,
+  [PostStatus.RIDE_DONE]:       3,
+  [PostStatus.DELIVERED]:       0,   // terminal
+  [PostStatus.RIDE_FAILED]:     3,
+  [PostStatus.DELIVERY_FAILED]: 3,
+};
+
+// ─── Transiciones válidas para Invoice.status ──────────────────────────────
 const INVOICE_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
-    [InvoiceStatus.DRAFT]:       [InvoiceStatus.PENDING],
-    [InvoiceStatus.PENDING]:     [InvoiceStatus.PROCESSING, InvoiceStatus.ERROR],
-    [InvoiceStatus.PROCESSING]:  [InvoiceStatus.SUBMITTED, InvoiceStatus.REJECTED, InvoiceStatus.ERROR],
-    [InvoiceStatus.SUBMITTED]:   [InvoiceStatus.AUTHORIZED, InvoiceStatus.REJECTED, InvoiceStatus.ERROR],
-    [InvoiceStatus.AUTHORIZED]:  [],  // TERMINAL EXITOSO
-    [InvoiceStatus.REJECTED]:    [InvoiceStatus.PENDING],  // reintentable manualmente
-    [InvoiceStatus.ERROR]:       [InvoiceStatus.PENDING],  // reintentable
-    [InvoiceStatus.CANCELLED]:   [],  // TERMINAL DEFINITIVO
+  [InvoiceStatus.DRAFT]:       [InvoiceStatus.PENDING],
+  [InvoiceStatus.PENDING]:     [InvoiceStatus.PROCESSING, InvoiceStatus.ERROR],
+  [InvoiceStatus.PROCESSING]:  [InvoiceStatus.SUBMITTED, InvoiceStatus.REJECTED, InvoiceStatus.ERROR],
+  [InvoiceStatus.SUBMITTED]:   [InvoiceStatus.AUTHORIZED, InvoiceStatus.REJECTED, InvoiceStatus.ERROR],
+  [InvoiceStatus.AUTHORIZED]:  [],       // TERMINAL
+  [InvoiceStatus.REJECTED]:    [InvoiceStatus.PENDING], // reintentable manualmente
+  [InvoiceStatus.ERROR]:       [InvoiceStatus.PENDING], // reintentable
+  [InvoiceStatus.CANCELLED]:   [],       // TERMINAL DEFINITIVO
 };
 
-// ─── Transiciones válidas para TaxDocument ───────────────────────────────────
-const TAX_DOC_TRANSITIONS: Record<TaxDocumentStatus, TaxDocumentStatus[]> = {
-    [TaxDocumentStatus.PENDING_SIGN]:  [TaxDocumentStatus.SIGNED, TaxDocumentStatus.NOT_RECEIVED],
-    [TaxDocumentStatus.SIGNED]:        [TaxDocumentStatus.SUBMITTED, TaxDocumentStatus.NOT_RECEIVED],
-    [TaxDocumentStatus.SUBMITTED]:     [TaxDocumentStatus.RECEIVED, TaxDocumentStatus.REJECTED, TaxDocumentStatus.NOT_RECEIVED],
-    [TaxDocumentStatus.RECEIVED]:      [TaxDocumentStatus.IN_PROCESS, TaxDocumentStatus.AUTHORIZED, TaxDocumentStatus.REJECTED],
-    [TaxDocumentStatus.IN_PROCESS]:    [TaxDocumentStatus.IN_PROCESS, TaxDocumentStatus.AUTHORIZED, TaxDocumentStatus.REJECTED],
-    [TaxDocumentStatus.AUTHORIZED]:    [TaxDocumentStatus.RIDE_GENERATED],  // TERMINAL EXITOSO
-    [TaxDocumentStatus.RIDE_GENERATED]:[],  // TERMINAL EXITOSO FINAL
-    [TaxDocumentStatus.REJECTED]:      [TaxDocumentStatus.PENDING_SIGN],    // reintentable
-    [TaxDocumentStatus.NOT_RECEIVED]:  [TaxDocumentStatus.PENDING_SIGN],    // reintentable
-    [TaxDocumentStatus.RETRY_QUEUED]:  [TaxDocumentStatus.PENDING_SIGN],
+// ─── Transiciones válidas para TaxDocument.sriStatus ──────────────────────
+// AUTHORIZED no tiene transiciones salientes — es terminal fiscal
+const SRI_TRANSITIONS: Record<SriStatus, SriStatus[]> = {
+  [SriStatus.PENDING_SIGN]:  [SriStatus.SIGNED, SriStatus.NOT_RECEIVED],
+  [SriStatus.SIGNED]:        [SriStatus.SUBMITTED, SriStatus.NOT_RECEIVED],
+  [SriStatus.SUBMITTED]:     [SriStatus.RECEIVED, SriStatus.REJECTED, SriStatus.NOT_RECEIVED],
+  [SriStatus.RECEIVED]:      [SriStatus.IN_PROCESS, SriStatus.AUTHORIZED, SriStatus.REJECTED],
+  [SriStatus.IN_PROCESS]:    [SriStatus.IN_PROCESS, SriStatus.AUTHORIZED, SriStatus.REJECTED],
+  [SriStatus.AUTHORIZED]:    [],  // ← TERMINAL FISCAL. Sin transiciones.
+  [SriStatus.REJECTED]:      [SriStatus.PENDING_SIGN], // reintentable con corrección
+  [SriStatus.NOT_RECEIVED]:  [SriStatus.PENDING_SIGN],
 };
 
-// ─── Estrategia de recovery por estado de TaxDocument ────────────────────────
-const TAX_DOC_RECOVERY: Record<TaxDocumentStatus, RecoveryStrategy> = {
-    [TaxDocumentStatus.PENDING_SIGN]:   'AUTO_RETRY',     // re-encolar firma
-    [TaxDocumentStatus.SIGNED]:         'AUTO_RETRY',     // re-encolar transmisión
-    [TaxDocumentStatus.SUBMITTED]:      'AUTO_RETRY',     // re-encolar poll
-    [TaxDocumentStatus.RECEIVED]:       'AUTO_RETRY',     // re-encolar poll
-    [TaxDocumentStatus.IN_PROCESS]:     'AUTO_RETRY',     // re-encolar poll
-    [TaxDocumentStatus.NOT_RECEIVED]:   'AUTO_RETRY',     // re-encolar desde transmisión
-    [TaxDocumentStatus.RETRY_QUEUED]:   'AUTO_RETRY',
-    [TaxDocumentStatus.REJECTED]:       'MANUAL_REVIEW',  // error de datos — humano decide
-    [TaxDocumentStatus.AUTHORIZED]:     'TERMINAL',
-    [TaxDocumentStatus.RIDE_GENERATED]: 'TERMINAL',
+// ─── Transiciones válidas para TaxDocument.postStatus ─────────────────────
+// Solo aplica cuando sriStatus = AUTHORIZED
+const POST_TRANSITIONS: Record<PostStatus, PostStatus[]> = {
+  [PostStatus.PENDING_RIDE]:     [PostStatus.RIDE_DONE, PostStatus.RIDE_FAILED],
+  [PostStatus.RIDE_DONE]:        [PostStatus.DELIVERED, PostStatus.DELIVERY_FAILED],
+  [PostStatus.DELIVERED]:        [],  // TERMINAL
+  [PostStatus.RIDE_FAILED]:      [PostStatus.PENDING_RIDE], // reintentable
+  [PostStatus.DELIVERY_FAILED]:  [PostStatus.RIDE_DONE],    // reintentable desde RIDE_DONE
 };
 
-// ─── Máquina de estados para Invoice ─────────────────────────────────────────
+// ─── Estrategia de recovery por sriStatus ─────────────────────────────────
+const SRI_RECOVERY: Record<SriStatus, RecoveryStrategy> = {
+  [SriStatus.PENDING_SIGN]:  'AUTO_RETRY',   // recovery job re-encola
+  [SriStatus.SIGNED]:        'AUTO_RETRY',
+  [SriStatus.SUBMITTED]:     'AUTO_RETRY',
+  [SriStatus.RECEIVED]:      'AUTO_RETRY',
+  [SriStatus.IN_PROCESS]:    'AUTO_RETRY',
+  [SriStatus.NOT_RECEIVED]:  'AUTO_RETRY',
+  [SriStatus.REJECTED]:      'MANUAL_REVIEW', // error de datos del SRI → humano revisa
+  [SriStatus.AUTHORIZED]:    'TERMINAL',
+};
+
+// ─── Estrategia de recovery por postStatus ────────────────────────────────
+const POST_RECOVERY: Record<PostStatus, RecoveryStrategy> = {
+  [PostStatus.PENDING_RIDE]:     'AUTO_RETRY',
+  [PostStatus.RIDE_DONE]:        'AUTO_RETRY',
+  [PostStatus.RIDE_FAILED]:      'AUTO_RETRY',
+  [PostStatus.DELIVERY_FAILED]:  'AUTO_RETRY',
+  [PostStatus.DELIVERED]:        'TERMINAL',
+};
+
+// ─── Máquina de estados para Invoice ──────────────────────────────────────
 export class InvoiceStateMachine {
-    static assertCanTransition(from: InvoiceStatus, to: InvoiceStatus): void {
-        const allowed = INVOICE_TRANSITIONS[from] ?? [];
-        if (!allowed.includes(to)) {
-            throw new BadRequestException(
-        `Transición inválida Invoice: ${from} → ${to}. ` +
-        `Permitidas desde ${from}: [${allowed.join(', ') || 'ninguna'}]`,
-        );
-    }
-    }
-
-    static canTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
-        return (INVOICE_TRANSITIONS[from] ?? []).includes(to);
-    }
-
-  // Estados finales — no se pueden modificar
-    static isTerminal(status: InvoiceStatus): boolean {
-        return [InvoiceStatus.AUTHORIZED, InvoiceStatus.CANCELLED].includes(status);
-    }
-
-  // Estados que el sistema puede reintentar automáticamente
-    static isAutoRetryable(status: InvoiceStatus): boolean {
-        return [InvoiceStatus.ERROR].includes(status);
-    }
-
-  // Estados que requieren decisión humana antes de reintentar
-    static isManualReview(status: InvoiceStatus): boolean {
-        return [InvoiceStatus.REJECTED].includes(status);
-    }
-}
-
-// ─── Máquina de estados para TaxDocument ─────────────────────────────────────
-export class TaxDocStateMachine {
-    static assertCanTransition(
-        from: TaxDocumentStatus,
-        to: TaxDocumentStatus,
-    ): void {
-    const allowed = TAX_DOC_TRANSITIONS[from] ?? [];
+  static assertCanTransition(from: InvoiceStatus, to: InvoiceStatus): void {
+    const allowed = INVOICE_TRANSITIONS[from] ?? [];
     if (!allowed.includes(to)) {
-        throw new BadRequestException(
-            `Transición inválida TaxDocument: ${from} → ${to}. ` +
-            `Permitidas desde ${from}: [${allowed.join(', ') || 'ninguna'}]`,
-        );
+      throw new BadRequestException(
+        `Transición inválida Invoice: ${from} → ${to}. ` +
+        `Permitidas desde ${from}: [${allowed.join(', ') || 'ninguna — estado terminal'}]`,
+      );
     }
-    }
+  }
 
-    static canTransition(from: TaxDocumentStatus, to: TaxDocumentStatus): boolean {
-        return (TAX_DOC_TRANSITIONS[from] ?? []).includes(to);
-    }
+  static canTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
+    return (INVOICE_TRANSITIONS[from] ?? []).includes(to);
+  }
 
-    static isTerminal(status: TaxDocumentStatus): boolean {
-        return [TaxDocumentStatus.AUTHORIZED, TaxDocumentStatus.RIDE_GENERATED].includes(status);
-    }
-
-  // Qué debe hacer el sistema con un documento en este estado
-    static getRecoveryStrategy(status: TaxDocumentStatus): RecoveryStrategy {
-        return TAX_DOC_RECOVERY[status] ?? 'MANUAL_REVIEW';
-    }
-
-  // Estados donde el recovery job debe intervenir
-    static needsAutoRecovery(status: TaxDocumentStatus): boolean {
-        return TAX_DOC_RECOVERY[status] === 'AUTO_RETRY';
-    }
-
-  // Estados que requieren intervención humana
-    static needsManualReview(status: TaxDocumentStatus): boolean {
-        return TAX_DOC_RECOVERY[status] === 'MANUAL_REVIEW';
-    }
+  static isTerminal(status: InvoiceStatus): boolean {
+    return [InvoiceStatus.AUTHORIZED, InvoiceStatus.CANCELLED].includes(status);
+  }
 }
+
+// ─── Máquina de estados para TaxDocument.sriStatus ────────────────────────
+export class SriStateMachine {
+  static assertCanTransition(from: SriStatus, to: SriStatus): void {
+    const allowed = SRI_TRANSITIONS[from] ?? [];
+    if (!allowed.includes(to)) {
+      throw new BadRequestException(
+        `Transición inválida sriStatus: ${from} → ${to}. ` +
+        `Permitidas desde ${from}: [${allowed.join(', ') || 'ninguna — estado terminal fiscal'}]`,
+      );
+    }
+  }
+
+  static canTransition(from: SriStatus, to: SriStatus): boolean {
+    return (SRI_TRANSITIONS[from] ?? []).includes(to);
+  }
+
+  // AUTHORIZED es terminal fiscal — nunca se puede modificar
+  static isTerminalFiscal(status: SriStatus): boolean {
+    return status === SriStatus.AUTHORIZED;
+  }
+
+  static getRecovery(status: SriStatus): RecoveryStrategy {
+    return SRI_RECOVERY[status] ?? 'MANUAL_REVIEW';
+  }
+
+  static getMaxRetries(status: SriStatus): number {
+    return SRI_MAX_RETRIES[status] ?? 3;
+  }
+
+  static needsAutoRecovery(status: SriStatus, retryCount: number): boolean {
+    return (
+      SRI_RECOVERY[status] === 'AUTO_RETRY' &&
+      retryCount < (SRI_MAX_RETRIES[status] ?? 3)
+    );
+  }
+
+  static needsManualReview(status: SriStatus, retryCount: number): boolean {
+    return (
+      SRI_RECOVERY[status] === 'MANUAL_REVIEW' ||
+      (SRI_RECOVERY[status] === 'AUTO_RETRY' &&
+        retryCount >= (SRI_MAX_RETRIES[status] ?? 3))
+    );
+  }
+}
+
+// ─── Máquina de estados para TaxDocument.postStatus ───────────────────────
+export class PostStateMachine {
+  static assertCanTransition(from: PostStatus, to: PostStatus): void {
+    const allowed = POST_TRANSITIONS[from] ?? [];
+    if (!allowed.includes(to)) {
+      throw new BadRequestException(
+        `Transición inválida postStatus: ${from} → ${to}. ` +
+        `Permitidas desde ${from}: [${allowed.join(', ') || 'ninguna'}]`,
+      );
+    }
+  }
+
+  static canTransition(from: PostStatus, to: PostStatus): boolean {
+    return (POST_TRANSITIONS[from] ?? []).includes(to);
+  }
+
+  static isTerminal(status: PostStatus): boolean {
+    return status === PostStatus.DELIVERED;
+  }
+
+  static getRecovery(status: PostStatus): RecoveryStrategy {
+    return POST_RECOVERY[status] ?? 'AUTO_RETRY';
+  }
+
+  static getMaxRetries(status: PostStatus): number {
+    return POST_MAX_RETRIES[status] ?? 3;
+  }
+
+  static needsAutoRecovery(status: PostStatus, retryCount: number): boolean {
+    return (
+      POST_RECOVERY[status] === 'AUTO_RETRY' &&
+      retryCount < (POST_MAX_RETRIES[status] ?? 3)
+    );
+  }
+}
+
+// Alias retrocompatibilidad
+export const TaxDocStateMachine = SriStateMachine;

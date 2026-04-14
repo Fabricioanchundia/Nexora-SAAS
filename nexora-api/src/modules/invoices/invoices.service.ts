@@ -1,28 +1,34 @@
 import {
-  Injectable, Logger, NotFoundException,
   ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
+import type { Queue } from 'bull';
 import Decimal from 'decimal.js';
 
 import { Invoice } from './entities/invoice.entity';
 import { InvoiceItem } from './entities/invoice-item.entity';
 import { TaxDocument } from '../tax-documents/entities/tax-document.entity';
-import { TaxDocumentEvent, TaxDocumentEventType } from '../tax-documents/entities/tax-document-event.entity';
+import {
+  TaxDocumentEvent,
+  TaxDocumentEventType,
+} from '../tax-documents/entities/tax-document-event.entity';
 import { Company } from '../companies/entities/company.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
-import { TaxDocumentStatus } from '../../common/enums/tax-document-status.enum';
+import { SriStatus, PostStatus } from '../../common/enums/tax-document-status.enum';
 import { QueueName, JobName } from '../../common/enums/queue-name.enum';
 import { IVA_PERCENTAGES } from '../../common/enums/tax-code.enum';
 import { User } from '../users/entities/user.entity';
-import { formatDateKey } from '../../common/utils/date.util';
-import { AccessKeyService } from './access-key.service';
+import { AccessKeyService } from '../../common/service/access-key.service';
+import { DocumentType } from '../../config/sri-config';
+import { InvoicePreValidatorService } from './validators/invoice-pre-validator.service';
 
 @Injectable()
 export class InvoicesService {
@@ -44,6 +50,7 @@ export class InvoicesService {
     private readonly dataSource: DataSource,
     private readonly auditLogsService: AuditLogsService,
     private readonly accessKeyService: AccessKeyService,
+    private readonly preValidator: InvoicePreValidatorService, // ← NUEVO
     @InjectQueue(QueueName.DOCUMENT_SIGNING)
     private readonly signingQueue: Queue,
   ) {}
@@ -53,7 +60,7 @@ export class InvoicesService {
     companyId: string,
     user: User,
   ): Promise<Invoice> {
-    // ─── Validaciones previas fuera de la transacción ────────────────────
+    // ─── 1. Cargar empresa y cliente ────────────────────────────────────────
     const company = await this.companyRepo.findOne({
       where: { id: companyId, isActive: true },
     });
@@ -64,63 +71,74 @@ export class InvoicesService {
     });
     if (!customer) throw new NotFoundException('Cliente no encontrado');
 
-    // Idempotencia: si el cliente envía un idempotencyKey, verificar duplicado
+    // ─── 2. Pre-validación SRI ANTES de cualquier transacción ───────────────
+    // Si falla aquí el usuario recibe un mensaje claro en español.
+    // Evita abrir transacciones, generar claves o encolar jobs para datos inválidos.
+    this.preValidator.validateOrThrow(dto, company, customer);
+
+    // ─── 3. Idempotencia ────────────────────────────────────────────────────
     if (dto.idempotencyKey) {
       const existing = await this.invoiceRepo.findOne({
         where: { idempotencyKey: dto.idempotencyKey, companyId },
       });
       if (existing) {
         this.logger.warn(
-          `Factura duplicada detectada por idempotencyKey=${dto.idempotencyKey}`,
+          `Factura duplicada detectada: idempotencyKey=${dto.idempotencyKey}`,
         );
         return this.findOne(existing.id, companyId);
       }
     }
 
+    // ─── 4. Calcular totales ─────────────────────────────────────────────────
     const totals = this.calculateTotals(dto.items);
-    this.validateTotals(totals); // falla si algo está en cero cuando no debería
 
+    if (totals.total <= 0) {
+      throw new ConflictException(
+        'El total de la factura no puede ser cero o negativo',
+      );
+    }
+
+    // ─── 5. Transacción atómica ──────────────────────────────────────────────
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
 
     try {
-      // ─── Secuencial atómico ──────────────────────────────────────────────
+      // Secuencial atómico — SELECT FOR UPDATE evita duplicados
       const locked = await qr.manager
-      .createQueryBuilder(Company, 'c')
-      .setLock('pessimistic_write')
-      .where('c.id = :id', { id: companyId })
-      .getOne();
+        .createQueryBuilder(Company, 'c')
+        .setLock('pessimistic_write')
+        .where('c.id = :id', { id: companyId })
+        .getOne();
 
-// Verificación explícita — TypeScript sabe que después de esto no es null
-    if (!locked) {
-  throw new Error(`Empresa ${companyId} no encontrada durante transacción`);
-  }
+      if (!locked) {
+        throw new Error(`Empresa ${companyId} no encontrada en transacción`);
+      }
 
-    const sequential = this.buildSequential(
+      const sequential = this.buildSequential(
         locked.establishmentCode,
         locked.emissionPoint,
         locked.nextSequential,
-  );
+      );
 
       await qr.manager.update(Company, companyId, {
         nextSequential: locked.nextSequential + 1,
-  });
-
-
-      // ─── Clave de acceso ─────────────────────────────────────────────────
-      // ⚠️ PENDIENTE — verificar algoritmo exacto con ficha técnica SRI vigente
-      const accessKey = this.accessKeyService.generate({
-        issueDate: new Date(dto.issueDate),
-        documentType: '01', // factura — verificar con ficha técnica
-        ruc: company.ruc,
-        environment: company.sriEnvironment,
-        sequential,
-        emissionType: company.emissionType,
-        numericCode: locked.nextSequential, // usar secuencial como código numérico → no aleatorio
       });
 
-      // ─── Guardar invoice ─────────────────────────────────────────────────
+      // Generar clave de acceso
+      const accessKey = this.accessKeyService.generate({
+        issueDate: new Date(dto.issueDate),
+        documentType: DocumentType.FACTURA,
+        ruc: locked.ruc,
+        environment: locked.sriEnvironment,
+        establishmentCode: locked.establishmentCode,
+        emissionPoint: locked.emissionPoint,
+        sequentialNumber: locked.nextSequential,
+        numericCode: locked.nextSequential,
+        emissionType: locked.emissionType,
+      });
+
+      // Guardar factura
       const invoice = await qr.manager.save(
         Invoice,
         qr.manager.create(Invoice, {
@@ -129,102 +147,106 @@ export class InvoicesService {
           userId: user.id,
           sequential,
           accessKey,
-          idempotencyKey: dto.idempotencyKey,
+          idempotencyKey: dto.idempotencyKey ?? null,
           issueDate: new Date(dto.issueDate),
-          subtotalNoTax: totals.subtotalNoTax,
+          subtotalNoTax:   totals.subtotalNoTax,
           subtotalTaxable: totals.subtotalTaxable,
-          discountTotal: totals.discountTotal,
-          taxAmount: totals.taxAmount,
-          total: totals.total,
-          status: InvoiceStatus.PENDING,
-          notes: dto.notes,
+          discountTotal:   totals.discountTotal,
+          taxAmount:       totals.taxAmount,
+          total:           totals.total,
+          status:          InvoiceStatus.PENDING,
+          notes:           dto.notes ?? null,
+          paymentMethods:  dto.paymentMethods ?? null,
+          guiaRemision:    dto.guiaRemision ?? null,
         }),
       );
 
-      // ─── Items — snapshot inmutable del precio al momento de facturar ────
+      // Guardar ítems — snapshot inmutable del precio al momento de facturar
       const items = dto.items.map((i) =>
         qr.manager.create(InvoiceItem, {
-          invoiceId: invoice.id,
-          productId: i.productId ?? null,
+          invoiceId:   invoice.id,
+          productId:   i.productId ?? null,
           productCode: i.productCode,
+          auxiliaryCode: null,
           description: i.description,
-          quantity: i.quantity,
-          unitPrice: i.unitPrice,
-          discount: i.discount ?? 0,
-          subtotal: this.itemSubtotal(i),
-          ivaRate: i.ivaRate,
-          taxCode: i.taxCode,
-          taxAmount: this.itemTax(i),
+          quantity:    i.quantity,
+          unitPrice:   i.unitPrice,
+          discount:    i.discount ?? 0,
+          subtotal:    this.itemSubtotal(i),
+          ivaRate:     i.ivaRate,
+          taxCode:     i.taxCode,
+          taxAmount:   this.itemTax(i),
         }),
       );
       await qr.manager.save(InvoiceItem, items);
 
-      // ─── TaxDocument — documento tributario vinculado ───────────────────
+      // Crear TaxDocument
       const taxDoc = await qr.manager.save(
         TaxDocument,
         qr.manager.create(TaxDocument, {
-          invoiceId: invoice.id,
+          invoiceId:           invoice.id,
           accessKey,
-          sriStatus: TaxDocumentStatus.PENDING_SIGN,
-          retryCount: 0,
-          environment: company.sriEnvironment, // guardar el ambiente al momento de crear
+          sriStatus:           SriStatus.PENDING_SIGN,
+          postStatus:          null,
+          environment:         company.sriEnvironment,
+          sriRetryCount:       0,
+          postRetryCount:      0,
+          authorizationNumber: null,
+          authorizedAt:        null,
+          submittedAt:         null,
+          lastError:           null,
+          sriRawResponse:      null,
         }),
       );
 
-      // ─── Primer evento del log inmutable ────────────────────────────────
-      await qr.manager.save(
-        TaxDocumentEvent,
-        qr.manager.create(TaxDocumentEvent, {
-          taxDocumentId: taxDoc.id,
-          eventType: TaxDocumentEventType.CREATED,
-          sriStatus: TaxDocumentStatus.PENDING_SIGN,
-          metadata: {
-            invoiceId: invoice.id,
-            sequential,
-            accessKey,
-            userId: user.id,
-            companyId,
-          },
-        }),
-      );
+      // Primer evento del log inmutable
+      const firstEvent = new TaxDocumentEvent();
+      firstEvent.taxDocumentId = taxDoc.id;
+      firstEvent.eventType     = TaxDocumentEventType.CREATED;
+      firstEvent.sriStatus     = SriStatus.PENDING_SIGN;
+      firstEvent.rawResponse   = null;
+      firstEvent.errorDetail   = null;
+      firstEvent.metadata      = {
+        invoiceId:   invoice.id,
+        sequential,
+        accessKey,
+        userId:      user.id,
+        companyId,
+        createdAt:   new Date().toISOString(),
+      };
+      await qr.manager.save(TaxDocumentEvent, firstEvent);
 
       await qr.commitTransaction();
 
-      // ─── Encolar DESPUÉS del commit ──────────────────────────────────────
-      // Si esto falla, la factura queda en PENDING y puede reintentarse
-      // manualmente o con un job de recuperación
-      const job = await this.signingQueue.add(
+      // ─── 6. Encolar DESPUÉS del commit ───────────────────────────────────
+      // Si el encolado falla, la factura queda en PENDING y el recovery la reencola
+      await this.signingQueue.add(
         JobName.SIGN_DOCUMENT,
+        { invoiceId: invoice.id, taxDocumentId: taxDoc.id, companyId },
         {
-          invoiceId: invoice.id,
-          taxDocumentId: taxDoc.id,
-          companyId,
-        },
-        {
-          jobId: `sign-${invoice.id}`, // ID determinístico — previene duplicados en cola
+          jobId:    `sign-${invoice.id}`, // ID determinístico — evita duplicados
           attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
+          backoff:  { type: 'exponential', delay: 5_000 },
           removeOnComplete: false,
-          removeOnFail: false,
+          removeOnFail:     false,
         },
       );
 
       this.logger.log(
-        `Factura creada: id=${invoice.id} seq=${sequential} jobId=${job.id}`,
+        `Factura creada: id=${invoice.id} seq=${sequential} key=${accessKey}`,
       );
 
-      // Auditoría no bloquea el flujo
       this.auditLogsService
         .log({
           companyId,
-          userId: user.id,
+          userId:     user.id,
           entityType: 'Invoice',
-          entityId: invoice.id,
-          action: 'CREATE',
-          metadata: { sequential, accessKey, total: totals.total },
+          entityId:   invoice.id,
+          action:     'CREATE',
+          metadata:   { sequential, accessKey, total: totals.total },
         })
         .catch((err) =>
-          this.logger.error('Error en audit log', err.message),
+          this.logger.error('Error en audit log', err instanceof Error ? err.message : String(err)),
         );
 
       return this.findOne(invoice.id, companyId);
@@ -232,13 +254,15 @@ export class InvoicesService {
       await qr.rollbackTransaction();
       this.logger.error(
         `Error creando factura empresa=${companyId}`,
-        err.stack,
+        err instanceof Error ? err.stack : String(err),
       );
       throw err;
     } finally {
       await qr.release();
     }
   }
+
+  // ─── Consultas ─────────────────────────────────────────────────────────────
 
   async findAll(companyId: string, page = 1, limit = 20) {
     const [data, total] = await this.invoiceRepo.findAndCount({
@@ -261,10 +285,8 @@ export class InvoicesService {
     const inv = await this.invoiceRepo.findOne({
       where: { id, companyId },
       relations: [
-        'customer',
-        'items',
-        'taxDocument',
-        'taxDocument.events',
+        'customer', 'items',
+        'taxDocument', 'taxDocument.events',
         'user',
       ],
     });
@@ -275,18 +297,20 @@ export class InvoicesService {
   async getTimeline(id: string, companyId: string) {
     const inv = await this.findOne(id, companyId);
     return {
-      invoiceId: inv.id,
-      sequential: inv.sequential,
+      invoiceId:     inv.id,
+      sequential:    inv.sequential,
       invoiceStatus: inv.status,
       taxDocument: inv.taxDocument
         ? {
-            id: inv.taxDocument.id,
-            accessKey: inv.taxDocument.accessKey,
-            sriStatus: inv.taxDocument.sriStatus,
+            id:                  inv.taxDocument.id,
+            accessKey:           inv.taxDocument.accessKey,
+            sriStatus:           inv.taxDocument.sriStatus,
+            postStatus:          inv.taxDocument.postStatus,
             authorizationNumber: inv.taxDocument.authorizationNumber,
-            authorizedAt: inv.taxDocument.authorizedAt,
-            retryCount: inv.taxDocument.retryCount,
-            lastError: inv.taxDocument.lastError,
+            authorizedAt:        inv.taxDocument.authorizedAt,
+            sriRetryCount:       inv.taxDocument.sriRetryCount,
+            postRetryCount:      inv.taxDocument.postRetryCount,
+            lastError:           inv.taxDocument.lastError,
           }
         : null,
       timeline: (inv.taxDocument?.events ?? [])
@@ -295,25 +319,22 @@ export class InvoicesService {
             new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
         )
         .map((e) => ({
-          id: e.id,
-          eventType: e.eventType,
-          sriStatus: e.sriStatus,
+          id:          e.id,
+          eventType:   e.eventType,
+          sriStatus:   e.sriStatus,
           errorDetail: e.errorDetail,
-          metadata: e.metadata,
-          createdAt: e.createdAt,
+          metadata:    e.metadata,
+          createdAt:   e.createdAt,
         })),
     };
   }
 
-  // Reintentar manualmente una factura fallida
   async retry(id: string, companyId: string, userId: string): Promise<void> {
     const inv = await this.findOne(id, companyId);
 
-    if (
-      ![InvoiceStatus.ERROR, InvoiceStatus.REJECTED].includes(inv.status)
-    ) {
+    if (![InvoiceStatus.ERROR, InvoiceStatus.REJECTED].includes(inv.status)) {
       throw new ConflictException(
-        'Solo se pueden reintentar facturas en estado ERROR',
+        'Solo se pueden reintentar facturas en estado ERROR o REJECTED',
       );
     }
 
@@ -321,27 +342,22 @@ export class InvoicesService {
       throw new ConflictException('No hay documento tributario asociado');
     }
 
-    // Resetear estado
     await this.invoiceRepo.update(id, { status: InvoiceStatus.PENDING });
     await this.taxDocRepo.update(inv.taxDocument.id, {
-      sriStatus: TaxDocumentStatus.PENDING_SIGN,
-      lastError: null,
-      retryCount: inv.taxDocument.retryCount + 1,
+      sriStatus:     SriStatus.PENDING_SIGN,
+      lastError:     null,
+      sriRetryCount: inv.taxDocument.sriRetryCount + 1,
     });
 
     await this.signingQueue.add(
       JobName.SIGN_DOCUMENT,
+      { invoiceId: id, taxDocumentId: inv.taxDocument.id, companyId },
       {
-        invoiceId: id,
-        taxDocumentId: inv.taxDocument.id,
-        companyId,
-      },
-      {
-        jobId: `sign-${id}-retry-${Date.now()}`,
+        jobId:    `sign-${id}-retry-${Date.now()}`,
         attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
+        backoff:  { type: 'exponential', delay: 5_000 },
         removeOnComplete: false,
-        removeOnFail: false,
+        removeOnFail:     false,
       },
     );
 
@@ -350,9 +366,9 @@ export class InvoicesService {
         companyId,
         userId,
         entityType: 'Invoice',
-        entityId: id,
-        action: 'RETRY',
-        metadata: { retryCount: inv.taxDocument.retryCount + 1 },
+        entityId:   id,
+        action:     'RETRY',
+        metadata:   { sriRetryCount: inv.taxDocument.sriRetryCount + 1 },
       })
       .catch(() => {});
   }
@@ -360,17 +376,17 @@ export class InvoicesService {
   // ─── Cálculos ──────────────────────────────────────────────────────────────
 
   private calculateTotals(items: CreateInvoiceDto['items']) {
-    let subtotalNoTax = new Decimal(0);
+    let subtotalNoTax   = new Decimal(0);
     let subtotalTaxable = new Decimal(0);
-    let discountTotal = new Decimal(0);
-    let taxAmount = new Decimal(0);
+    let discountTotal   = new Decimal(0);
+    let taxAmount       = new Decimal(0);
 
     for (const i of items) {
-      const qty = new Decimal(i.quantity);
-      const price = new Decimal(i.unitPrice);
-      const disc = new Decimal(i.discount ?? 0);
+      const qty      = new Decimal(i.quantity);
+      const price    = new Decimal(i.unitPrice);
+      const disc     = new Decimal(i.discount ?? 0);
       const subtotal = qty.mul(price).minus(disc);
-      const rate = new Decimal(IVA_PERCENTAGES[i.ivaRate] ?? 0);
+      const rate     = new Decimal(IVA_PERCENTAGES[i.ivaRate] ?? 0);
 
       discountTotal = discountTotal.plus(disc);
 
@@ -384,11 +400,11 @@ export class InvoicesService {
     }
 
     return {
-      subtotalNoTax: subtotalNoTax.toDecimalPlaces(2).toNumber(),
+      subtotalNoTax:   subtotalNoTax.toDecimalPlaces(2).toNumber(),
       subtotalTaxable: subtotalTaxable.toDecimalPlaces(2).toNumber(),
-      discountTotal: discountTotal.toDecimalPlaces(2).toNumber(),
-      taxAmount: taxAmount.toDecimalPlaces(2).toNumber(),
-      total: subtotalNoTax
+      discountTotal:   discountTotal.toDecimalPlaces(2).toNumber(),
+      taxAmount:       taxAmount.toDecimalPlaces(2).toNumber(),
+      total:           subtotalNoTax
         .plus(subtotalTaxable)
         .plus(taxAmount)
         .toDecimalPlaces(2)
@@ -396,15 +412,11 @@ export class InvoicesService {
     };
   }
 
-  private validateTotals(totals: ReturnType<typeof this.calculateTotals>) {
-    if (totals.total <= 0) {
-      throw new ConflictException(
-        'El total de la factura no puede ser cero o negativo',
-      );
-    }
-  }
-
-  private itemSubtotal(i: any): number {
+  private itemSubtotal(i: {
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+  }): number {
     return new Decimal(i.quantity)
       .mul(i.unitPrice)
       .minus(i.discount ?? 0)
@@ -412,19 +424,19 @@ export class InvoicesService {
       .toNumber();
   }
 
-  private itemTax(i: any): number {
+  private itemTax(i: {
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+    ivaRate: string;
+  }): number {
     return new Decimal(this.itemSubtotal(i))
       .mul(IVA_PERCENTAGES[i.ivaRate] ?? 0)
       .toDecimalPlaces(2)
       .toNumber();
   }
 
-  private buildSequential(
-    estab: string,
-    punto: string,
-    seq: number,
-  ): string {
-    // ⚠️ Formato: 001-001-000000001 — verificar con ficha técnica SRI
+  private buildSequential(estab: string, punto: string, seq: number): string {
     return `${estab}-${punto}-${String(seq).padStart(9, '0')}`;
   }
 }

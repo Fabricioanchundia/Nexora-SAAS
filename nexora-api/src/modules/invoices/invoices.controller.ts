@@ -1,6 +1,6 @@
 import {
   Body, Controller, Get, Param,
-  Post, Query, UseGuards,
+  Post, Query, UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
@@ -42,5 +42,16 @@ export class InvoicesController {
   @Get(':id/timeline')
   getTimeline(@Param('id') id: string, @CurrentCompany() co: Company) {
     return this.svc.getTimeline(id, co.id);
+  }
+
+  // Reintentar una factura que falló
+  @Post(':id/retry')
+  @HttpCode(HttpStatus.OK)
+  retry(
+    @Param('id') id: string,
+    @CurrentCompany() co: Company,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.retry(id, co.id, user.id);
   }
 }

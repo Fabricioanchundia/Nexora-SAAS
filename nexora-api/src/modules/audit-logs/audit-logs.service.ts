@@ -9,7 +9,7 @@ interface LogDto {
   entityType: string;
   entityId?: string;
   action: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   ipAddress?: string;
 }
 
@@ -25,7 +25,7 @@ export class AuditLogsService {
     try {
       await this.repo.save(this.repo.create(dto));
     } catch (err) {
-      this.logger.error('Error guardando audit log', err.message);
+      this.logger.error('Error guardando audit log', err instanceof Error ? err.message : String(err));
     }
   }
 

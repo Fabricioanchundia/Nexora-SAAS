@@ -9,18 +9,15 @@ import {
   toErrorMessage,
 } from '../../common/errors/nexora.errors';
 
+// ─── URLs confirmadas — Ficha Técnica SRI Ecuador v2.26, sección 7.2 ─────────
 const ENDPOINTS: Record<EnvironmentType, { reception: string; authorization: string }> = {
   [EnvironmentType.PRUEBAS]: {
-    reception:
-      'https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline',
-    authorization:
-      'https://celcer.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline',
+    reception:    'https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline',
+    authorization:'https://celcer.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline',
   },
   [EnvironmentType.PRODUCCION]: {
-    reception:
-      'https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline',
-    authorization:
-      'https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline',
+    reception:    'https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline',
+    authorization:'https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline',
   },
 };
 
@@ -29,9 +26,12 @@ export interface SriMessage {
   message: string;
   additionalInfo: string;
   type: 'ERROR' | 'ADVERTENCIA' | 'INFORMATIVO';
+  // Traducción al español para el usuario final
+  humanMessage: string;
 }
 
 export type SriReceptionState = 'RECIBIDA' | 'DEVUELTA';
+// PPR = procesamiento pendiente de respuesta (ficha técnica SRI)
 export type SriAuthorizationState = 'AUTORIZADO' | 'NO AUTORIZADO' | 'PPR';
 
 export interface SriReceptionResult {
@@ -50,6 +50,8 @@ export interface SriAuthorizationResult {
 }
 
 const TIMEOUT_MS = 30_000;
+// Límite de bytes guardados en DB para rawXml (evita columnas enormes)
+const RAW_XML_MAX_BYTES = 4_000;
 
 @Injectable()
 export class SriIntegrationService {
@@ -76,8 +78,7 @@ export class SriIntegrationService {
     const url = ENDPOINTS[env].reception;
     const xmlBase64 = Buffer.from(signedXml, 'utf-8').toString('base64');
     const soap = this.buildReceptionSoap(xmlBase64);
-    this.logger.debug(`SRI submitDocument [${env}]`);
-    const rawXml = await this.postSoap(url, soap);
+    const rawXml = await this.postSoap(url, soap, 'recepción');
     return this.parseReception(rawXml);
   }
 
@@ -87,12 +88,16 @@ export class SriIntegrationService {
   ): Promise<SriAuthorizationResult> {
     const url = ENDPOINTS[env].authorization;
     const soap = this.buildAuthorizationSoap(accessKey);
-    this.logger.debug(`SRI checkAuthorization [${env}]`);
-    const rawXml = await this.postSoap(url, soap);
+    const rawXml = await this.postSoap(url, soap, 'autorización');
     return this.parseAuthorization(rawXml);
   }
 
-  private async postSoap(url: string, body: string): Promise<string> {
+  // ─── HTTP robusto ────────────────────────────────────────────────────────
+  private async postSoap(
+    url: string,
+    body: string,
+    operation: string,
+  ): Promise<string> {
     try {
       const res = await firstValueFrom(
         this.http
@@ -102,8 +107,23 @@ export class SriIntegrationService {
           })
           .pipe(timeout(TIMEOUT_MS)),
       );
+
+      // Validar que la respuesta no está vacía (el SRI a veces devuelve 200 vacío)
+      if (!res.data || res.data.trim().length === 0) {
+        this.logger.warn(`SRI devolvió respuesta vacía en ${operation}`);
+        throw new SriConnectionError(
+          `El SRI devolvió una respuesta vacía en ${operation}`,
+        );
+      }
+
+      this.logger.debug(
+        `SRI ${operation} respuesta: ${res.data.substring(0, 200)}`,
+      );
       return res.data;
     } catch (err) {
+      if (err instanceof SriConnectionError || err instanceof SriTimeoutError) {
+        throw err;
+      }
       const msg = toErrorMessage(err);
       if (
         msg.includes('timeout') ||
@@ -116,21 +136,24 @@ export class SriIntegrationService {
     }
   }
 
+  // ─── Parser de recepción ─────────────────────────────────────────────────
   private parseReception(rawXml: string): SriReceptionResult {
-    const safe = rawXml.substring(0, 4000);
+    const safe = rawXml.substring(0, RAW_XML_MAX_BYTES);
 
     let root: unknown;
     try {
       root = this.xmlParser.parse(rawXml);
     } catch (err) {
       this.logger.error('Error parseando XML recepción', toErrorMessage(err));
+      this.logger.debug('XML recibido:', safe);
       return {
         state: 'DEVUELTA',
         messages: [{
           identifier: 'PARSE_ERROR',
-          message: 'No se pudo parsear la respuesta del SRI',
+          message: 'Respuesta del SRI no se pudo procesar',
           additionalInfo: safe,
           type: 'ERROR',
+          humanMessage: 'El SRI respondió con un formato inesperado. Reintentando...',
         }],
         rawXml: safe,
       };
@@ -144,7 +167,8 @@ export class SriIntegrationService {
     );
 
     if (!respuesta) {
-      this.logger.warn('Respuesta de recepción con estructura inesperada');
+      this.logger.warn('Estructura inesperada en respuesta de recepción');
+      this.logger.debug('XML raw:', safe);
       return { state: 'DEVUELTA', messages: [], rawXml: safe };
     }
 
@@ -155,14 +179,17 @@ export class SriIntegrationService {
     return { state, messages, rawXml: safe };
   }
 
+  // ─── Parser de autorización ──────────────────────────────────────────────
   private parseAuthorization(rawXml: string): SriAuthorizationResult {
-    const safe = rawXml.substring(0, 4000);
+    const safe = rawXml.substring(0, RAW_XML_MAX_BYTES);
 
     let root: unknown;
     try {
       root = this.xmlParser.parse(rawXml);
     } catch (err) {
       this.logger.error('Error parseando XML autorización', toErrorMessage(err));
+      this.logger.debug('XML raw:', safe);
+      // Si no podemos parsear → asumir PPR y reintentar
       return {
         state: 'PPR',
         authorizationNumber: null,
@@ -181,15 +208,8 @@ export class SriIntegrationService {
     );
 
     if (!respuesta) {
-      this.logger.warn('Respuesta de autorización con estructura inesperada');
-      return {
-        state: 'PPR',
-        authorizationNumber: null,
-        authorizedAt: null,
-        environment: null,
-        messages: [],
-        rawXml: safe,
-      };
+      this.logger.warn('Estructura inesperada en respuesta de autorización');
+      return { state: 'PPR', authorizationNumber: null, authorizedAt: null, environment: null, messages: [], rawXml: safe };
     }
 
     const autorizaciones = this.arr(
@@ -197,24 +217,20 @@ export class SriIntegrationService {
     );
     const auth = autorizaciones[0];
 
+    // Sin autorizacion = PPR (el SRI aún está procesando)
     if (!auth) {
-      return {
-        state: 'PPR',
-        authorizationNumber: null,
-        authorizedAt: null,
-        environment: null,
-        messages: [],
-        rawXml: safe,
-      };
+      return { state: 'PPR', authorizationNumber: null, authorizedAt: null, environment: null, messages: [], rawXml: safe };
     }
 
-    const estadoRaw = this.str(auth, 'estado') ?? '';
+    const estadoRaw = (this.str(auth, 'estado') ?? '').toUpperCase().trim();
+    // ⚠️ El SRI usa tanto "PPR" como "EN PROCESO" según la versión del WS
     let state: SriAuthorizationState;
     if (estadoRaw === 'AUTORIZADO') {
       state = 'AUTORIZADO';
-    } else if (estadoRaw === 'PPR' || estadoRaw === '') {
+    } else if (estadoRaw === 'PPR' || estadoRaw === 'EN PROCESO' || estadoRaw === '') {
       state = 'PPR';
     } else {
+      // RECHAZADO o NO AUTORIZADO = rechazo definitivo
       state = 'NO AUTORIZADO';
     }
 
@@ -224,25 +240,18 @@ export class SriIntegrationService {
     let authorizedAt: Date | null = null;
     if (fechaStr) {
       const d = new Date(fechaStr);
-      // ← corregido: usar Number.isNaN en vez de isNaN (sonarqube S7773)
       authorizedAt = Number.isNaN(d.getTime()) ? null : d;
     }
 
     const environment = this.str(auth, 'ambiente') ?? null;
-    const messages = this.arr(
-      this.nav(auth, 'mensajes', 'mensaje'),
-    ).map((m) => this.normalizeMessage(m));
+    const messages = this.arr(this.nav(auth, 'mensajes', 'mensaje')).map(
+      (m) => this.normalizeMessage(m),
+    );
 
-    return {
-      state,
-      authorizationNumber: authNumber,
-      authorizedAt,
-      environment,
-      messages,
-      rawXml: safe,
-    };
+    return { state, authorizationNumber: authNumber, authorizedAt, environment, messages, rawXml: safe };
   }
 
+  // ─── Mensajes ────────────────────────────────────────────────────────────
   private extractReceptionMessages(respuesta: unknown): SriMessage[] {
     const comprobantes = this.arr(
       this.nav(respuesta, 'comprobantes', 'comprobante'),
@@ -258,11 +267,9 @@ export class SriIntegrationService {
   private normalizeMessage(raw: unknown): SriMessage {
     if (!raw || typeof raw !== 'object') {
       return {
-        identifier: '',
-        // ← corregido: cast explícito en vez de ?? ''  (evita S6551)
-        message: typeof raw === 'string' ? raw : '',
-        additionalInfo: '',
-        type: 'ERROR',
+        identifier: '', message: String(raw ?? ''),
+        additionalInfo: '', type: 'ERROR',
+        humanMessage: String(raw ?? ''),
       };
     }
     const m = raw as Record<string, unknown>;
@@ -271,20 +278,35 @@ export class SriIntegrationService {
     if (tipoRaw === 'ADVERTENCIA') type = 'ADVERTENCIA';
     else if (tipoRaw === 'INFORMATIVO') type = 'INFORMATIVO';
 
+    const identifier = typeof m['identificador'] === 'string' ? m['identificador'] : '';
+    const message    = typeof m['mensaje'] === 'string' ? m['mensaje'] : '';
+    const additionalInfo = typeof m['informacionAdicional'] === 'string'
+      ? m['informacionAdicional'] : '';
+
     return {
-      // ← corregido: cast tipado en vez de String() con ?? '' (evita S6551)
-      identifier: typeof m['identificador'] === 'string' ? m['identificador'] : '',
-      message: typeof m['mensaje'] === 'string' ? m['mensaje'] : '',
-      additionalInfo:
-        typeof m['informacionAdicional'] === 'string'
-          ? m['informacionAdicional']
-          : '',
+      identifier,
+      message,
+      additionalInfo,
       type,
+      humanMessage: this.translateSriError(identifier, message),
     };
   }
 
-  // ─── Helpers de navegación ────────────────────────────────────────────────
+  // Traducción de errores del SRI a mensajes útiles para el usuario
+  // ⚠️ PENDIENTE: completar con todos los códigos del SRI
+  private translateSriError(code: string, original: string): string {
+    const map: Record<string, string> = {
+      '43': 'Esta factura ya fue enviada anteriormente. Verifica en el historial.',
+      '35': 'La estructura interna de la factura tiene un error técnico.',
+      '15': 'El RUC del emisor no está activo en el SRI.',
+      '65': 'La fecha de emisión es demasiado antigua. Corrígela.',
+      '30': 'El RUC del comprador no es válido.',
+      '60': 'Este comprobante fue generado en ambiente de pruebas.',
+    };
+    return map[code] ?? original;
+  }
 
+  // ─── Helpers de navegación ────────────────────────────────────────────────
   private nav(obj: unknown, ...keys: string[]): unknown {
     let cur = obj;
     for (const k of keys) {
@@ -298,7 +320,6 @@ export class SriIntegrationService {
     if (!obj || typeof obj !== 'object') return undefined;
     const v = (obj as Record<string, unknown>)[key];
     if (v == null) return undefined;
-    // CDATA viene como objeto con propiedad #cdata
     if (typeof v === 'object' && '#cdata' in (v as object)) {
       const cdata = (v as Record<string, unknown>)['#cdata'];
       return typeof cdata === 'string' ? cdata.trim() : undefined;
@@ -312,19 +333,15 @@ export class SriIntegrationService {
     return [val];
   }
 
-  // ─── Envelopes SOAP ───────────────────────────────────────────────────────
-
+  // ─── Envelopes SOAP ──────────────────────────────────────────────────────
   private buildReceptionSoap(xmlBase64: string): string {
     return (
       '<?xml version="1.0" encoding="UTF-8"?>' +
       '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"' +
       ' xmlns:ec="http://ec.gob.sri.ws.recepcion">' +
-      '<soap:Body>' +
-      '<ec:validarComprobante>' +
+      '<soap:Body><ec:validarComprobante>' +
       `<xml>${xmlBase64}</xml>` +
-      '</ec:validarComprobante>' +
-      '</soap:Body>' +
-      '</soap:Envelope>'
+      '</ec:validarComprobante></soap:Body></soap:Envelope>'
     );
   }
 
@@ -333,12 +350,9 @@ export class SriIntegrationService {
       '<?xml version="1.0" encoding="UTF-8"?>' +
       '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"' +
       ' xmlns:ec="http://ec.gob.sri.ws.autorizacion">' +
-      '<soap:Body>' +
-      '<ec:autorizacionComprobante>' +
+      '<soap:Body><ec:autorizacionComprobante>' +
       `<claveAccesoComprobante>${accessKey}</claveAccesoComprobante>` +
-      '</ec:autorizacionComprobante>' +
-      '</soap:Body>' +
-      '</soap:Envelope>'
+      '</ec:autorizacionComprobante></soap:Body></soap:Envelope>'
     );
   }
 }

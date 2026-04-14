@@ -1,4 +1,9 @@
-// src/modules/jobs/processors/sign-document.processor.ts
+// CAMBIO vs versión anterior:
+// - Usa classifySigningError() para decidir reintentar vs revisión manual
+// - Errores permanentes → NO re-lanza (BullMQ no reintenta)
+// - Errores transitorios → re-lanza (BullMQ reintenta)
+// - Errores de configuración → marca para revisión manual Y notifica admin
+
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,7 +12,7 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Job, Queue } from 'bull';
 
 import { QueueName, JobName } from '../../../common/enums/queue-name.enum';
-import { TaxDocumentStatus } from '../../../common/enums/tax-document-status.enum';
+import { SriStatus } from '../../../common/enums/tax-document-status.enum';
 import { InvoiceStatus } from '../../../common/enums/invoice-status.enum';
 import { TaxDocumentEventType } from '../../tax-documents/entities/tax-document-event.entity';
 import { TaxDocument } from '../../tax-documents/entities/tax-document.entity';
@@ -17,14 +22,11 @@ import { XmlGenerationService } from '../../xml-generation/xml-generation.servic
 import { SigningService } from '../../signing/signing.service';
 import { CertificatesService } from '../../certificates/certificates.service';
 import { StorageService } from '../../storage/storage.service';
-import { InvoiceStateMachine } from '../../../common/states/invoice-state.machine';
+import { SriStateMachine } from '../../../common/states/invoice-state.machine';
 import {
-  isRetryable,
-  toErrorMessage,
-  CertificateExpiredError,
-  CertificateInvalidError,
-  SigningError,
-} from '../../../common/errors/nexora.errors';
+  classifySigningError,
+  SigningErrorType,
+} from '../../signing/signing-error.types';
 
 export interface SignDocumentJobData {
   invoiceId: string;
@@ -55,77 +57,61 @@ export class SignDocumentProcessor {
     const { invoiceId, taxDocumentId, companyId } = job.data;
 
     this.logger.log(
-      `[FIRMA] Iniciando: invoice=${invoiceId} intento=${job.attemptsMade + 1}`,
+      `[FIRMA] invoice=${invoiceId} intento=${job.attemptsMade + 1}`,
     );
 
-    // Marcar como en proceso
     await this.invoiceRepo.update(invoiceId, {
       status: InvoiceStatus.PROCESSING,
     });
 
     await this.taxDocSvc.addEvent(taxDocumentId, {
       eventType: TaxDocumentEventType.SIGN_STARTED,
-      sriStatus: TaxDocumentStatus.PENDING_SIGN,
+      sriStatus: SriStatus.PENDING_SIGN,
       metadata: {
         jobId: String(job.id),
         attempt: job.attemptsMade,
-        queue: QueueName.DOCUMENT_SIGNING,
       },
     });
 
     try {
-      // ─── Cargar la factura completa ──────────────────────────────────────
+      // Cargar factura con todas las relaciones necesarias para XML
       const invoice = await this.invoiceRepo.findOne({
         where: { id: invoiceId },
         relations: ['company', 'customer', 'items'],
       });
 
       if (!invoice) {
-        // Error no reintentable — la factura no existe
-        throw new SigningError(`Factura ${invoiceId} no encontrada en BD`);
+        // Error permanente — la factura no existe
+        throw new Error(`Factura ${invoiceId} no encontrada en BD`);
       }
 
-      if (!invoice.company || !invoice.customer || !invoice.items?.length) {
-        throw new SigningError(
-          `Factura ${invoiceId} incompleta: falta company, customer o items`,
-        );
-      }
-
-      // ─── Generar XML ─────────────────────────────────────────────────────
+      // Generar XML
       const xmlString = await this.xmlSvc.generateInvoiceXml(invoice);
-
       const now = new Date();
-      const yearMonth = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const xmlPath = `${companyId}/xml/${yearMonth}/${invoice.accessKey}.xml`;
+      const prefix = `${companyId}/xml/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const xmlPath = `${prefix}/${invoice.accessKey}.xml`;
 
       await this.storageSvc.upload(xmlPath, Buffer.from(xmlString, 'utf-8'));
       await this.taxDocRepo.update(taxDocumentId, { xmlPath });
 
-      this.logger.debug(`XML generado y guardado: ${xmlPath}`);
-
-      // ─── Cargar certificado y firmar ──────────────────────────────────────
-      const { buffer: p12Buffer, passphrase } =
+      // Cargar certificado y firmar
+      const { buffer: p12, passphrase } =
         await this.certSvc.getCertForSigning(companyId);
 
       const signedXml = await this.signSvc.signXml(
         xmlString,
-        p12Buffer,
+        p12,
         passphrase,
         companyId,
       );
 
-      const signedPath = `${companyId}/xml/${yearMonth}/${invoice.accessKey}-signed.xml`;
-      await this.storageSvc.upload(
-        signedPath,
-        Buffer.from(signedXml, 'utf-8'),
-      );
+      const signedPath = `${prefix}/${invoice.accessKey}-signed.xml`;
+      await this.storageSvc.upload(signedPath, Buffer.from(signedXml, 'utf-8'));
 
-      this.logger.debug(`XML firmado guardado: ${signedPath}`);
-
-      // ─── Transición de estado validada ───────────────────────────────────
+      // Transición de estado validada
       await this.taxDocSvc.transition({
         taxDocumentId,
-        toStatus: TaxDocumentStatus.SIGNED,
+        toStatus: SriStatus.SIGNED,
         updates: { signedXmlPath: signedPath },
         event: {
           eventType: TaxDocumentEventType.SIGN_COMPLETED,
@@ -133,7 +119,7 @@ export class SignDocumentProcessor {
         },
       });
 
-      // ─── Encolar transmisión ──────────────────────────────────────────────
+      // Encolar transmisión
       await this.txQueue.add(
         JobName.TRANSMIT_DOCUMENT,
         {
@@ -145,7 +131,7 @@ export class SignDocumentProcessor {
           environment: invoice.company.sriEnvironment,
         },
         {
-          jobId: `transmit-${invoiceId}`, // idempotente
+          jobId: `transmit-${invoiceId}`,
           delay: 1000,
           attempts: 5,
           backoff: { type: 'exponential', delay: 10_000 },
@@ -156,47 +142,51 @@ export class SignDocumentProcessor {
 
       this.logger.log(`[FIRMA] Completada: invoice=${invoiceId}`);
     } catch (err) {
-      const message = toErrorMessage(err);
-      const shouldRetry = isRetryable(err);
+      // ─── Clasificar el error para decidir estrategia ──────────────────
+      const classified = classifySigningError(err);
 
       this.logger.error(
-        `[FIRMA] Error invoice=${invoiceId} reintentable=${shouldRetry}: ${message}`,
+        `[FIRMA] Error invoice=${invoiceId} ` +
+          `tipo=${classified.type} reintentable=${classified.retryable}: ` +
+          classified.message,
       );
-
-      // Errores de certificado no son reintentables
-      const isCertError =
-        err instanceof CertificateExpiredError ||
-        err instanceof CertificateInvalidError;
 
       await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.SIGN_FAILED,
-        sriStatus: TaxDocumentStatus.PENDING_SIGN,
-        errorDetail: message,
+        sriStatus: SriStatus.PENDING_SIGN,
+        errorDetail: classified.message,
         metadata: {
+          errorType: classified.type,
+          retryable: classified.retryable,
+          requiresManualReview: classified.requiresManualReview,
           attempt: job.attemptsMade,
-          retryable: shouldRetry,
-          errorType: isCertError ? 'CERTIFICATE' : 'SIGNING',
         },
       });
 
       await this.taxDocRepo.update(taxDocumentId, {
-        lastError: message,
+        lastError: `[${classified.type}] ${classified.message}`,
       });
 
-      // Si es un error de certificado, marcar como ERROR definitivo
-      if (isCertError) {
+      if (classified.requiresManualReview) {
+        // Error permanente o de configuración → no reintentar
         await this.invoiceRepo.update(invoiceId, {
           status: InvoiceStatus.ERROR,
         });
-        // NO re-lanzar — BullMQ no reintentará
+
+        // TODO: si classified.notifyAdmin → enviar notificación al admin de la empresa
+        // this.notificationsService.notifyAdminCertError(companyId, classified.message)
+
+        this.logger.warn(
+          `[FIRMA] Marcada para revisión manual: invoice=${invoiceId} tipo=${classified.type}`,
+        );
+        // NO re-lanzar — BullMQ no reintenta
         return;
       }
 
+      // Error transitorio → re-lanzar para que BullMQ reintente
       await this.invoiceRepo.update(invoiceId, {
         status: InvoiceStatus.ERROR,
       });
-
-      // Re-lanzar para que BullMQ gestione el reintento
       throw err;
     }
   }

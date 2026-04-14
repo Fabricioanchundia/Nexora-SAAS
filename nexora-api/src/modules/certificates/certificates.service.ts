@@ -86,7 +86,7 @@ export class CertificatesService {
       };
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
-      this.logger.error('Error procesando .p12', err.message);
+      this.logger.error('Error procesando .p12', err instanceof Error ? err.message : String(err));
       throw new BadRequestException(
         'El archivo .p12 no es válido o la contraseña es incorrecta',
       );

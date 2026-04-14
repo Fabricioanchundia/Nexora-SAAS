@@ -11,7 +11,12 @@ import { Customer } from '../customers/entities/customer.entity';
 
 import { InvoicesService } from './invoices.service';
 import { InvoicesController } from './invoices.controller';
-import { AccessKeyService } from './access-key.service';  // ← nuevo
+
+// ← Ahora vive en common/services (única fuente de verdad)
+import { AccessKeyService } from '../../common/service/access-key.service';
+
+// ← NUEVO: validador pre-SRI
+import { InvoicePreValidatorService } from './validators/invoice-pre-validator.service';
 
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { CompaniesModule } from '../companies/companies.module';
@@ -34,7 +39,8 @@ import { QueueName } from '../../common/enums/queue-name.enum';
   controllers: [InvoicesController],
   providers: [
     InvoicesService,
-    AccessKeyService,  // ← registrar como provider
+    AccessKeyService,              // ← fuente única de verdad para clave de acceso
+    InvoicePreValidatorService,    // ← NUEVO: pre-validación antes de enviar al SRI
   ],
   exports: [InvoicesService],
 })
