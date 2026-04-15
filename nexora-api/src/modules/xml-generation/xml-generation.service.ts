@@ -1,10 +1,3 @@
-// src/modules/xml-generation/xml-generation.service.ts
-//
-// CAMBIO vs versión anterior:
-// - Elimina TODO hardcode tributario → usa sri-config.ts
-// - '2' para IVA, '01' para factura, '2.1.0' → todos desde sri-config
-// - Fácil de actualizar cuando el SRI cambia normativa
-
 import { Injectable, Logger } from '@nestjs/common';
 import { create } from 'xmlbuilder2';
 import Decimal from 'decimal.js';
@@ -40,16 +33,33 @@ export class XmlGenerationService {
 
   private build(invoice: Invoice): string {
     const { company, customer, items } = invoice;
-
-    // sequential validado arriba — el ! es seguro
     const [estab, ptoEmi, secuencial] = invoice.sequential!.split('-');
 
     const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele('factura', {
       id: 'comprobante',
-      version: SRI_XML_VERSION,  // ← antes: '2.1.0' hardcodeado
+      version: SRI_XML_VERSION,
     });
 
-    // ─── infoTributaria ───────────────────────────────────────────────────
+    this.buildInfoTributaria(doc, company, invoice, estab, ptoEmi, secuencial);
+    this.buildInfoFactura(doc, company, customer, invoice, items);
+    this.buildDetalles(doc, items);
+    this.buildInfoAdicional(doc, customer, invoice);
+
+    const xml = doc.end({ prettyPrint: false });
+    this.logger.debug(
+      `XML generado: ${invoice.sequential} (${xml.length} bytes)`,
+    );
+    return xml;
+  }
+
+  private buildInfoTributaria(
+    doc: any,
+    company: any,
+    invoice: Invoice,
+    estab: string,
+    ptoEmi: string,
+    secuencial: string,
+  ): void {
     const it = doc.ele('infoTributaria');
     it.ele('ambiente').txt(String(company.sriEnvironment));
     it.ele('tipoEmision').txt(String(company.emissionType));
@@ -59,7 +69,7 @@ export class XmlGenerationService {
     );
     it.ele('ruc').txt(company.ruc);
     it.ele('claveAcceso').txt(invoice.accessKey!);
-    it.ele('codDoc').txt(DocumentType.FACTURA);   // ← antes: '01' hardcodeado
+    it.ele('codDoc').txt(DocumentType.FACTURA);
     it.ele('estab').txt(estab ?? '001');
     it.ele('ptoEmi').txt(ptoEmi ?? '001');
     it.ele('secuencial').txt(secuencial ?? '000000001');
@@ -68,14 +78,20 @@ export class XmlGenerationService {
     if (company.specialContributorCode) {
       it.ele('contribuyenteEspecial').txt(company.specialContributorCode);
     }
+  }
 
-    // ─── infoFactura ──────────────────────────────────────────────────────
+  private buildInfoFactura(
+    doc: any,
+    company: any,
+    customer: any,
+    invoice: Invoice,
+    items: InvoiceItem[],
+  ): void {
     const inf = doc.ele('infoFactura');
     inf.ele('fechaEmision').txt(formatDateSri(new Date(invoice.issueDate)));
     inf.ele('dirEstablecimiento').txt(
       this.sanitize(company.establishmentAddress ?? company.address ?? ''),
     );
-    // obligadoContabilidad viene de la entidad — NO hardcodeado
     inf.ele('obligadoContabilidad').txt(company.obligadoContabilidad ? 'SI' : 'NO');
     inf.ele('tipoIdentificacionComprador').txt(String(customer.identificationType));
     inf.ele('razonSocialComprador').txt(this.sanitize(customer.fullName));
@@ -94,24 +110,30 @@ export class XmlGenerationService {
       new Decimal(invoice.discountTotal).toDecimalPlaces(2).toFixed(2),
     );
 
-    // totalConImpuestos — agrupado por tarifa IVA
-    const tci = inf.ele('totalConImpuestos');
-    for (const [ivaRate, group] of Object.entries(this.groupByIva(items))) {
-      const ti = tci.ele('totalImpuesto');
-      ti.ele('codigo').txt(TaxGroupCode.IVA);   // ← antes: '2' hardcodeado
-      ti.ele('codigoPorcentaje').txt(ivaRate);
-      ti.ele('descuentoAdicional').txt('0.00');
-      ti.ele('baseImponible').txt(group.base.toFixed(2));
-      ti.ele('valor').txt(group.tax.toFixed(2));
-    }
+    this.buildTotalConImpuestos(inf, items);
 
     inf.ele('propina').txt('0.00');
     inf.ele('importeTotal').txt(
       new Decimal(invoice.total).toDecimalPlaces(2).toFixed(2),
     );
-    inf.ele('moneda').txt(SRI_CURRENCY);   // ← antes: 'DOLAR' hardcodeado
+    inf.ele('moneda').txt(SRI_CURRENCY);
 
-    // pagos — si no se especifica usa DEFAULT_PAYMENT_CODE
+    this.buildPagos(inf, invoice);
+  }
+
+  private buildTotalConImpuestos(inf: any, items: InvoiceItem[]): void {
+    const tci = inf.ele('totalConImpuestos');
+    for (const [ivaRate, group] of Object.entries(this.groupByIva(items))) {
+      const ti = tci.ele('totalImpuesto');
+      ti.ele('codigo').txt(TaxGroupCode.IVA);
+      ti.ele('codigoPorcentaje').txt(ivaRate);
+      ti.ele('descuentoAdicional').txt('0.00');
+      ti.ele('baseImponible').txt(group.base.toFixed(2));
+      ti.ele('valor').txt(group.tax.toFixed(2));
+    }
+  }
+
+  private buildPagos(inf: any, invoice: Invoice): void {
     const pagos = inf.ele('pagos');
     const formasPago = invoice.paymentMethods?.length
       ? invoice.paymentMethods
@@ -128,8 +150,9 @@ export class XmlGenerationService {
         p.ele('unidadTiempo').txt(pago.timeUnit ?? DEFAULT_TIME_UNIT);
       }
     }
+  }
 
-    // ─── detalles ─────────────────────────────────────────────────────────
+  private buildDetalles(doc: any, items: InvoiceItem[]): void {
     const dets = doc.ele('detalles');
     for (const item of items) {
       const d = dets.ele('detalle');
@@ -156,9 +179,8 @@ export class XmlGenerationService {
       );
 
       const imps = d.ele('impuestos').ele('impuesto');
-      imps.ele('codigo').txt(TaxGroupCode.IVA);  // ← antes: '2' hardcodeado
+      imps.ele('codigo').txt(TaxGroupCode.IVA);
       imps.ele('codigoPorcentaje').txt(String(item.ivaRate));
-      // IVA_CODE_TO_RATE reemplaza el mapa hardcodeado anterior
       imps.ele('tarifa').txt(IVA_CODE_TO_RATE[String(item.ivaRate)] ?? '0');
       imps.ele('baseImponible').txt(
         new Decimal(item.subtotal).toDecimalPlaces(2).toFixed(2),
@@ -167,8 +189,9 @@ export class XmlGenerationService {
         new Decimal(item.taxAmount).toDecimalPlaces(2).toFixed(2),
       );
     }
+  }
 
-    // ─── infoAdicional ────────────────────────────────────────────────────
+  private buildInfoAdicional(doc: any, customer: any, invoice: Invoice): void {
     const campos: Array<{ nombre: string; valor: string }> = [];
     if (customer.email)   campos.push({ nombre: 'email',         valor: customer.email });
     if (customer.phone)   campos.push({ nombre: 'telefono',      valor: customer.phone });
@@ -181,12 +204,6 @@ export class XmlGenerationService {
         ia.ele('campoAdicional', { nombre: c.nombre }).txt(c.valor);
       }
     }
-
-    const xml = doc.end({ prettyPrint: false });
-    this.logger.debug(
-      `XML generado: ${invoice.sequential} (${xml.length} bytes)`,
-    );
-    return xml;
   }
 
   private groupByIva(
@@ -209,7 +226,7 @@ export class XmlGenerationService {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&apos;')
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+      .replaceAll(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   }
 
   private trunc(s: string, max: number): string {

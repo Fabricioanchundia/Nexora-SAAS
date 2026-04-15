@@ -1,4 +1,3 @@
-// src/modules/tax-documents/tax-documents.service.ts
 import {
   Injectable, InternalServerErrorException, Logger, NotFoundException,
 } from '@nestjs/common';
@@ -33,19 +32,14 @@ export class TaxDocumentsService {
   private readonly logger = new Logger(TaxDocumentsService.name);
 
   constructor(
-    @InjectRepository(TaxDocument)
-    private readonly repo: Repository<TaxDocument>,
-    @InjectRepository(TaxDocumentEvent)
-    private readonly eventRepo: Repository<TaxDocumentEvent>,
+    @InjectRepository(TaxDocument) private readonly repo: Repository<TaxDocument>,
+    @InjectRepository(TaxDocumentEvent) private readonly eventRepo: Repository<TaxDocumentEvent>,
     private readonly dataSource: DataSource,
   ) {}
 
-  // ─── TRANSICIÓN ATÓMICA ───────────────────────────────────────────────────
   async transition(dto: TransitionDto): Promise<TaxDocument> {
     const doc = await this.repo.findOne({ where: { id: dto.taxDocumentId } });
-    if (!doc) {
-      throw new NotFoundException(`TaxDocument ${dto.taxDocumentId} no encontrado`);
-    }
+    if (!doc) throw new NotFoundException(`TaxDocument ${dto.taxDocumentId} no encontrado`);
 
     TaxDocStateMachine.assertCanTransition(doc.sriStatus, dto.toStatus);
 
@@ -55,45 +49,39 @@ export class TaxDocumentsService {
 
     try {
       const updatedDoc = await qr.manager.save(TaxDocument, {
-        ...doc,
-        sriStatus: dto.toStatus,
-        ...(dto.updates ?? {}),
+        ...doc, sriStatus: dto.toStatus, ...dto.updates,
       });
 
-      const event = new TaxDocumentEvent();
+      const event        = new TaxDocumentEvent();
       event.taxDocumentId = dto.taxDocumentId;
       event.eventType     = dto.event.eventType;
       event.sriStatus     = dto.toStatus ?? null;
       event.rawResponse   = (dto.event.rawResponse as object) ?? null;
       event.errorDetail   = dto.event.errorDetail ?? null;
       event.metadata      = {
-        ...(dto.event.metadata ?? {}),
-        fromStatus: doc.sriStatus,
-        toStatus: dto.toStatus,
-        transitionedAt: new Date().toISOString(),
+        ...(dto.event.metadata ?? ({} as Record<string, unknown>)),
+        fromStatus:       doc.sriStatus,
+        toStatus:         dto.toStatus,
+        transitionedAt:   new Date().toISOString(),
       };
 
       await qr.manager.save(TaxDocumentEvent, event);
       await qr.commitTransaction();
-
       this.logger.log(`TaxDoc ${dto.taxDocumentId}: ${doc.sriStatus} → ${dto.toStatus}`);
       return updatedDoc;
     } catch (err) {
       await qr.rollbackTransaction();
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(
-        `Transición fallida ${doc.sriStatus} → ${dto.toStatus} taxDoc=${dto.taxDocumentId}: ${message}`,
-      );
+      this.logger.error(`Transición fallida ${doc.sriStatus} → ${dto.toStatus} taxDoc=${dto.taxDocumentId}: ${message}`);
       throw new InternalServerErrorException(`Error en transición de estado: ${message}`);
     } finally {
       await qr.release();
     }
   }
 
-  // ─── addEvent — lanza si no puede guardar ─────────────────────────────────
   async addEvent(taxDocumentId: string, dto: AddEventDto): Promise<TaxDocumentEvent> {
     try {
-      const event = new TaxDocumentEvent();
+      const event        = new TaxDocumentEvent();
       event.taxDocumentId = taxDocumentId;
       event.eventType     = dto.eventType;
       event.sriStatus     = dto.sriStatus ?? null;
@@ -103,19 +91,14 @@ export class TaxDocumentsService {
       return await this.eventRepo.save(event);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(
-        `CRÍTICO: Error guardando evento ${dto.eventType} taxDoc=${taxDocumentId}: ${message}`,
-      );
-      throw new InternalServerErrorException(
-        `Error de trazabilidad: no se pudo guardar evento ${dto.eventType}`,
-      );
+      this.logger.error(`CRÍTICO: Error guardando evento ${dto.eventType} taxDoc=${taxDocumentId}: ${message}`);
+      throw new InternalServerErrorException(`Error de trazabilidad: no se pudo guardar evento ${dto.eventType}`);
     }
   }
 
-  // ─── addEventSafe — NO lanza, solo loggea ────────────────────────────────
   async addEventSafe(taxDocumentId: string, dto: AddEventDto): Promise<TaxDocumentEvent | null> {
     try {
-      const event = new TaxDocumentEvent();
+      const event        = new TaxDocumentEvent();
       event.taxDocumentId = taxDocumentId;
       event.eventType     = dto.eventType;
       event.sriStatus     = dto.sriStatus ?? null;
@@ -130,23 +113,15 @@ export class TaxDocumentsService {
     }
   }
 
-  // ─── Incremento atómico de sriRetryCount ─────────────────────────────────
   async incrementSriRetry(taxDocumentId: string, errorMessage: string): Promise<void> {
-    await this.repo
-      .createQueryBuilder()
-      .update(TaxDocument)
+    await this.repo.createQueryBuilder().update(TaxDocument)
       .set({ sriRetryCount: () => 'sri_retry_count + 1', lastError: errorMessage })
       .where('id = :id', { id: taxDocumentId })
       .execute();
   }
 
-  // ─── Consultas ────────────────────────────────────────────────────────────
   async findByInvoiceId(invoiceId: string): Promise<TaxDocument | null> {
-    return this.repo.findOne({
-      where: { invoiceId },
-      relations: ['events'],
-      order: { events: { createdAt: 'ASC' } },
-    });
+    return this.repo.findOne({ where: { invoiceId }, relations: ['events'], order: { events: { createdAt: 'ASC' } } });
   }
 
   async findById(id: string): Promise<TaxDocument | null> {
@@ -156,49 +131,25 @@ export class TaxDocumentsService {
   async getTimeline(invoiceId: string) {
     const doc = await this.findByInvoiceId(invoiceId);
     if (!doc) throw new NotFoundException('Documento tributario no encontrado');
-
     return {
-      id:                  doc.id,
-      accessKey:           doc.accessKey,
-      environment:         doc.environment,
-      sriStatus:           doc.sriStatus,
-      authorizationNumber: doc.authorizationNumber,
-      authorizedAt:        doc.authorizedAt,
-      submittedAt:         doc.submittedAt,
-      sriRetryCount:       doc.sriRetryCount,
-      lastError:           doc.lastError,
-      xmlPath:             doc.xmlPath,
-      signedXmlPath:       doc.signedXmlPath,
-      ridePdfPath:         doc.ridePdfPath,
-      createdAt:           doc.createdAt,
-      updatedAt:           doc.updatedAt,
+      id: doc.id, accessKey: doc.accessKey, environment: doc.environment,
+      sriStatus: doc.sriStatus, authorizationNumber: doc.authorizationNumber,
+      authorizedAt: doc.authorizedAt, submittedAt: doc.submittedAt,
+      sriRetryCount: doc.sriRetryCount, lastError: doc.lastError,
+      xmlPath: doc.xmlPath, signedXmlPath: doc.signedXmlPath, ridePdfPath: doc.ridePdfPath,
+      createdAt: doc.createdAt, updatedAt: doc.updatedAt,
       events: [...doc.events]
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-        .map((e) => ({
-          id:          e.id,
-          eventType:   e.eventType,
-          sriStatus:   e.sriStatus,
-          errorDetail: e.errorDetail,
-          metadata:    e.metadata,
-          createdAt:   e.createdAt,
-        })),
+        .map((e) => ({ id: e.id, eventType: e.eventType, sriStatus: e.sriStatus, errorDetail: e.errorDetail, metadata: e.metadata, createdAt: e.createdAt })),
     };
   }
 
   async findStuck(olderThanMinutes: number): Promise<TaxDocument[]> {
     const cutoff = new Date();
     cutoff.setMinutes(cutoff.getMinutes() - olderThanMinutes);
-
-    return this.repo
-      .createQueryBuilder('td')
+    return this.repo.createQueryBuilder('td')
       .where('td.sri_status IN (:...statuses)', {
-        statuses: [
-          SriStatus.PENDING_SIGN,
-          SriStatus.SIGNED,
-          SriStatus.SUBMITTED,
-          SriStatus.RECEIVED,
-          SriStatus.IN_PROCESS,
-        ],
+        statuses: [SriStatus.PENDING_SIGN, SriStatus.SIGNED, SriStatus.SUBMITTED, SriStatus.RECEIVED, SriStatus.IN_PROCESS],
       })
       .andWhere('td.updated_at < :cutoff', { cutoff })
       .andWhere('td.sri_retry_count < :maxRetries', { maxRetries: 5 })

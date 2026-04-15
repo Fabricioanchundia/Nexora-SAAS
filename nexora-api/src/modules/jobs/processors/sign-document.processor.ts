@@ -1,14 +1,7 @@
-// CAMBIO vs versión anterior:
-// - Usa classifySigningError() para decidir reintentar vs revisión manual
-// - Errores permanentes → NO re-lanza (BullMQ no reintenta)
-// - Errores transitorios → re-lanza (BullMQ reintenta)
-// - Errores de configuración → marca para revisión manual Y notifica admin
-
-import { Process, Processor } from '@nestjs/bull';
+import { Process, Processor, InjectQueue } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { InjectQueue } from '@nestjs/bull';
 import type { Job, Queue } from 'bull';
 
 import { QueueName, JobName } from '../../../common/enums/queue-name.enum';
@@ -22,10 +15,8 @@ import { XmlGenerationService } from '../../xml-generation/xml-generation.servic
 import { SigningService } from '../../signing/signing.service';
 import { CertificatesService } from '../../certificates/certificates.service';
 import { StorageService } from '../../storage/storage.service';
-import { SriStateMachine } from '../../../common/states/invoice-state.machine';
 import {
   classifySigningError,
-  SigningErrorType,
 } from '../../signing/signing-error.types';
 
 export interface SignDocumentJobData {
@@ -173,7 +164,7 @@ export class SignDocumentProcessor {
           status: InvoiceStatus.ERROR,
         });
 
-        // TODO: si classified.notifyAdmin → enviar notificación al admin de la empresa
+        // Pendiente: notificar al admin cuando classified.notifyAdmin → enviar notificación al admin de la empresa
         // this.notificationsService.notifyAdminCertError(companyId, classified.message)
 
         this.logger.warn(

@@ -1,9 +1,3 @@
-// PROPÓSITO: detectar errores ANTES de generar XML y transmitir al SRI.
-// Previene el 80% de rechazos del SRI con mensajes claros en español.
-//
-// Por qué importa: cuando el SRI rechaza (DEVUELTA), el estado queda
-// como REJECTED y no es reintentable automáticamente.
-// Mejor detectarlo aquí y dar un mensaje útil al usuario.
 import {
   BadRequestException,
   Injectable,
@@ -95,7 +89,7 @@ export class InvoicePreValidatorService {
       (now.getTime() - issueDate.getTime()) / (1000 * 60 * 60 * 24),
     );
 
-    if (isNaN(issueDate.getTime())) {
+    if (Number.isNaN(issueDate.getTime())) {
       errors.push({
         field: 'issueDate',
         message: 'La fecha de emisión no es válida.',
@@ -134,7 +128,7 @@ export class InvoicePreValidatorService {
       });
     }
 
-    if (!company.establishmentCode?.match(/^\d{3}$/)) {
+    if (!company.establishmentCode || !/^\d{3}$/.exec(company.establishmentCode)) {
       errors.push({
         field: 'company.establishmentCode',
         message: 'El código de establecimiento debe tener exactamente 3 dígitos.',
@@ -142,7 +136,7 @@ export class InvoicePreValidatorService {
       });
     }
 
-    if (!company.emissionPoint?.match(/^\d{3}$/)) {
+    if (!company.emissionPoint || !/^\d{3}$/.exec(company.emissionPoint)) {
       errors.push({
         field: 'company.emissionPoint',
         message: 'El punto de emisión debe tener exactamente 3 dígitos.',

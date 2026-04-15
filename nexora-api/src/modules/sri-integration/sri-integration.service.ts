@@ -267,9 +267,9 @@ export class SriIntegrationService {
   private normalizeMessage(raw: unknown): SriMessage {
     if (!raw || typeof raw !== 'object') {
       return {
-        identifier: '', message: String(raw ?? ''),
+        identifier: '', message: typeof raw === 'string' ? raw : '',
         additionalInfo: '', type: 'ERROR',
-        humanMessage: String(raw ?? ''),
+        humanMessage: typeof raw === 'string' ? raw : '',
       };
     }
     const m = raw as Record<string, unknown>;
@@ -320,11 +320,13 @@ export class SriIntegrationService {
     if (!obj || typeof obj !== 'object') return undefined;
     const v = (obj as Record<string, unknown>)[key];
     if (v == null) return undefined;
-    if (typeof v === 'object' && '#cdata' in (v as object)) {
+    if (typeof v === 'object' && '#cdata' in v) {
       const cdata = (v as Record<string, unknown>)['#cdata'];
       return typeof cdata === 'string' ? cdata.trim() : undefined;
     }
-    return typeof v === 'string' ? v.trim() : String(v).trim();
+    if (typeof v === 'string') return v.trim();
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v).trim();
+    return undefined;
   }
 
   private arr(val: unknown): unknown[] {

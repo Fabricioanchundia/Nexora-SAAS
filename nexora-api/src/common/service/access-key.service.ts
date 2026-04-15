@@ -1,15 +1,3 @@
-// CAMBIO DE UBICACIÓN: antes en src/modules/invoices/access-key.service.ts
-//
-// Por qué: la clave de acceso es un concepto TRIBUTARIO, no de factura.
-// TaxDocument la almacena, InvoicesService la genera, SriIntegration la usa.
-// Pertenece a common/ como servicio compartido, no a un módulo específico.
-//
-// IMPACTO: actualizar las importaciones en:
-// - invoices.service.ts  → import desde '../../common/services/access-key.service'
-// - invoices.module.ts   → ya no provee AccessKeyService, lo importa de CommonModule
-//
-// Algoritmo módulo 11 — confirmado ficha técnica SRI Ecuador v2.26, sección 5.2
-
 import { Injectable, Logger } from '@nestjs/common';
 import {
   DocumentType,
@@ -71,7 +59,7 @@ export class AccessKeyService {
   }
 
   validate(key: string): boolean {
-    if (!key || key.length !== 49) return false;
+    if (!key?.length || key.length !== 49) return false;
     if (!/^\d{49}$/.test(key)) return false;
     return this.mod11(key.slice(0, 48)) === key.slice(48);
   }
@@ -83,7 +71,7 @@ export class AccessKeyService {
     const weights = [2, 3, 4, 5, 6, 7];
     let sum = 0;
     for (let i = key48.length - 1; i >= 0; i--) {
-      sum += parseInt(key48[i], 10) * weights[(key48.length - 1 - i) % weights.length];
+      sum += Number.parseInt(key48[i], 10) * weights[(key48.length - 1 - i) % weights.length];
     }
     const d = 11 - (sum % 11);
     if (d === 11) return '0';

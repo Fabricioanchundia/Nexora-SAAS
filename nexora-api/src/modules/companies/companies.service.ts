@@ -34,7 +34,7 @@ export class CompaniesService {
     });
     return cus
       .filter((cu) => cu.company?.isActive)
-      .map((cu) => cu.company as Company);
+      .map((cu) => cu.company).filter((c): c is Company => c !== null && c !== undefined);
   }
 
   async findOne(id: string, userId: string): Promise<Company> {
@@ -42,8 +42,8 @@ export class CompaniesService {
       where: { companyId: id, userId, isActive: true },
       relations: ['company'],
     });
-    if (!cu || !cu.company?.isActive) throw new NotFoundException('Empresa no encontrada');
-    return cu.company as Company;
+    if (!cu?.company?.isActive) throw new NotFoundException('Empresa no encontrada');
+    return cu.company;
   }
 
   async update(id: string, dto: UpdateCompanyDto, userId: string): Promise<Company> {

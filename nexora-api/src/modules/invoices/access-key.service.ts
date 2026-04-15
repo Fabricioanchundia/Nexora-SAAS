@@ -67,7 +67,7 @@ export class AccessKeyService {
     }
 
     validate(key: string): boolean {
-        if (!key || key.length !== 49) return false;
+        if (key?.length !== 49) return false;
         if (!/^\d{49}$/.test(key)) return false;
         const body = key.slice(0, 48);
         const provided = key.slice(48);
@@ -83,7 +83,7 @@ export class AccessKeyService {
         let weightIndex = 0;
 
     for (let i = key48.length - 1; i >= 0; i--) {
-        sum += parseInt(key48[i], 10) * weights[weightIndex % weights.length];
+        sum += Number.parseInt(key48[i], 10) * weights[weightIndex % weights.length];
         weightIndex++;
     }
 

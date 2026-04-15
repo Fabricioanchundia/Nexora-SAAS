@@ -1,9 +1,8 @@
 // src/modules/jobs/processors/transmit-document.processor.ts
-import { Process, Processor } from '@nestjs/bull';
+import { Process, Processor, InjectQueue } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { InjectQueue } from '@nestjs/bull';
 import type { Job, Queue } from 'bull';
 
 import { QueueName, JobName } from '../../../common/enums/queue-name.enum';
@@ -20,9 +19,6 @@ import {
 import { StorageService } from '../../storage/storage.service';
 import { EnvironmentType } from '../../../common/enums/environment-type.enum';
 import {
-  SriRejectedError,
-  SriConnectionError,
-  SriTimeoutError,
   isRetryable,
   toErrorMessage,
 } from '../../../common/errors/nexora.errors';
@@ -64,7 +60,7 @@ export class TransmitDocumentProcessor {
   // ─── Job 1: Transmitir al SRI ──────────────────────────────────────────────
   @Process({ name: JobName.TRANSMIT_DOCUMENT, concurrency: 3 })
   async handleTransmit(job: Job<TransmitJobData>): Promise<void> {
-    const { invoiceId, taxDocumentId, signedXmlPath, accessKey, environment } =
+    const { invoiceId, taxDocumentId, signedXmlPath, environment } =
       job.data;
 
     this.logger.log(

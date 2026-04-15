@@ -87,11 +87,11 @@ export class GenerateRideProcessor {
 
       this.logger.log(`RIDE generado: invoice=${invoiceId} path=${pdfPath}`);
     } catch (err) {
-      this.logger.error(`Error generando RIDE invoice=${invoiceId}`, err.stack);
+      this.logger.error(`Error generando RIDE invoice=${invoiceId}`, err instanceof Error ? err.stack : String(err));
       await this.taxDocSvc.addEvent(taxDocumentId, {
         eventType: TaxDocumentEventType.RIDE_FAILED,
-        sriStatus: TaxDocumentStatus.AUTHORIZED, // autorización intacta
-        errorDetail: err.message,
+        sriStatus: undefined,
+        errorDetail: err instanceof Error ? err.message : String(err),
       });
       throw err;
     }
