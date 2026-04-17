@@ -22,10 +22,11 @@ export class Invoice {
   @Column({ name: 'company_id' }) companyId!: string;
   @Column({ name: 'customer_id' }) customerId!: string;
   @Column({ name: 'user_id' }) userId!: string;
-  @Index() @Column({ length: 17, nullable: true }) sequential!: string | null;
-  @Index({ unique: true }) @Column({ name: 'access_key', length: 49, nullable: true }) accessKey!: string | null;
+  @Index() @Column({ type: 'varchar', length: 17, nullable: true }) sequential!: string | null;
+  @Index({ unique: true }) @Column({ name: 'access_key', type: 'varchar', length: 49, nullable: true }) accessKey!: string | null;
   @Index({ unique: true, where: '"idempotency_key" IS NOT NULL' })
-  @Column({ name: 'idempotency_key', length: 100, nullable: true }) idempotencyKey!: string | null;
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 100, nullable: true }) idempotencyKey!: string | null;
+  @Column({ name: 'guia_remision', type: 'varchar', length: 17, nullable: true }) guiaRemision!: string | null;
   @Column({ name: 'issue_date', type: 'date' }) issueDate!: Date;
   @Column({ name: 'subtotal_no_tax', type: 'decimal', precision: 14, scale: 2, default: 0 }) subtotalNoTax!: number;
   @Column({ name: 'subtotal_taxable', type: 'decimal', precision: 14, scale: 2, default: 0 }) subtotalTaxable!: number;
@@ -35,7 +36,6 @@ export class Invoice {
   @Column({ type: 'enum', enum: InvoiceStatus, default: InvoiceStatus.DRAFT }) status!: InvoiceStatus;
   @Column({ type: 'text', nullable: true }) notes!: string | null;
   @Column({ name: 'payment_methods', type: 'jsonb', nullable: true }) paymentMethods!: PaymentMethod[] | null;
-  @Column({ name: 'guia_remision', length: 17, nullable: true }) guiaRemision!: string | null;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
 

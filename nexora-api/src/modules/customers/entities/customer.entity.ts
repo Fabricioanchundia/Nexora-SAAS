@@ -10,11 +10,11 @@ export class Customer {
   @PrimaryGeneratedColumn('uuid') id!: string;
   @Column({ name: 'company_id' }) companyId!: string;
   @Column({ name: 'identification_type', type: 'enum', enum: IdentificationType }) identificationType!: IdentificationType;
-  @Index() @Column({ length: 20 }) identification!: string;
+  @Index() @Column({ type: 'varchar', length: 20 }) identification!: string;
   @Column({ name: 'full_name', length: 300 }) fullName!: string;
-  @Column({ length: 255, nullable: true }) email!: string | null;
-  @Column({ length: 20, nullable: true }) phone!: string | null;
-  @Column({ length: 500, nullable: true }) address!: string | null;
+  @Column({ type: 'varchar', length: 255, nullable: true }) email!: string | null;
+  @Column({ type: 'varchar', length: 20, nullable: true }) phone!: string | null;
+  @Column({ type: 'varchar', length: 500, nullable: true }) address!: string | null;
   @Column({ name: 'is_active', default: true }) isActive!: boolean;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;

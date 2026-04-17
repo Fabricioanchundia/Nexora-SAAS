@@ -12,7 +12,7 @@ export class Certificate {
   @Column({ name: 'passphrase_encrypted', length: 500 }) passphraseEncrypted!: string;
   @Column({ name: 'valid_from', type: 'date' }) validFrom!: Date;
   @Column({ name: 'valid_until', type: 'date' }) validUntil!: Date;
-  @Column({ name: 'holder_name', length: 300, nullable: true }) holderName!: string | null;
+  @Column({ name: 'holder_name', type: 'varchar', length: 300, nullable: true }) holderName!: string | null;
   @Column({ name: 'is_active', default: true }) isActive!: boolean;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;

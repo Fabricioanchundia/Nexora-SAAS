@@ -6,9 +6,9 @@ import { Invoice } from './invoice.entity';
 export class InvoiceItem {
   @PrimaryGeneratedColumn('uuid') id!: string;
   @Column({ name: 'invoice_id' }) invoiceId!: string;
-  @Column({ name: 'product_id', nullable: true }) productId!: string | null;
+  @Column({ name: 'product_id', type: 'varchar', nullable: true }) productId!: string | null;
   @Column({ name: 'product_code', length: 100 }) productCode!: string;
-  @Column({ name: 'auxiliary_code', length: 100, nullable: true }) auxiliaryCode!: string | null;
+  @Column({ name: 'auxiliary_code', type: 'varchar', length: 100, nullable: true }) auxiliaryCode!: string | null;
   @Column({ length: 300 }) description!: string;
   @Column({ type: 'decimal', precision: 12, scale: 6 }) quantity!: number;
   @Column({ name: 'unit_price', type: 'decimal', precision: 12, scale: 6 }) unitPrice!: number;

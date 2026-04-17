@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
+import { StorageModule } from '../storage/storage.module';
+import { RideModule } from '../ride/ride.module';
 
 import { Invoice } from './entities/invoice.entity';
 import { InvoiceItem } from './entities/invoice-item.entity';
@@ -35,12 +37,14 @@ import { QueueName } from '../../common/enums/queue-name.enum';
     BullModule.registerQueue({ name: QueueName.DOCUMENT_SIGNING }),
     AuditLogsModule,
     CompaniesModule,
+    StorageModule,
+    RideModule,   // ← aquí, fuera del TypeOrmModule
   ],
   controllers: [InvoicesController],
   providers: [
     InvoicesService,
-    AccessKeyService,              // ← fuente única de verdad para clave de acceso
-    InvoicePreValidatorService,    // ← NUEVO: pre-validación antes de enviar al SRI
+    AccessKeyService,
+    InvoicePreValidatorService,
   ],
   exports: [InvoicesService],
 })

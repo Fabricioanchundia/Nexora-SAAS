@@ -176,7 +176,7 @@ export class RideService {
     const W = doc.page.width - 80;
 
     doc.fontSize(7).font('Helvetica').fillColor('#6b7280');
-    doc.text('Ambiente: ' + (inv.company.sriEnvironment === 'PRODUCTION' ? 'PRODUCCIÓN' : 'PRUEBAS'),
+    doc.text('Ambiente: ' + (String(inv.company.sriEnvironment) === 'PRODUCTION' ? 'PRODUCCIÓN' : 'PRUEBAS'),
       40, y, { width: W });
     doc.text('Este documento es una representación impresa del comprobante electrónico autorizado por el SRI.',
       40, y + 10, { width: W });

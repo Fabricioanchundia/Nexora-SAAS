@@ -12,13 +12,13 @@ export class TaxDocument {
   @PrimaryGeneratedColumn('uuid') id!: string;
   @Column({ name: 'invoice_id' }) invoiceId!: string;
   @Column({ name: 'access_key', length: 49 }) accessKey!: string;
-  @Column({ name: 'xml_path', length: 500, nullable: true }) xmlPath!: string | null;
-  @Column({ name: 'signed_xml_path', length: 500, nullable: true }) signedXmlPath!: string | null;
-  @Column({ name: 'ride_pdf_path', length: 500, nullable: true }) ridePdfPath!: string | null;
+  @Column({ name: 'xml_path', type: 'varchar', length: 500, nullable: true }) xmlPath!: string | null;
+  @Column({ name: 'signed_xml_path', type: 'varchar', length: 500, nullable: true }) signedXmlPath!: string | null;
+  @Column({ name: 'ride_pdf_path', type: 'varchar', length: 500, nullable: true }) ridePdfPath!: string | null;
   @Column({ name: 'sri_status', type: 'enum', enum: SriStatus, default: SriStatus.PENDING_SIGN }) sriStatus!: SriStatus;
   @Column({ name: 'post_status', type: 'enum', enum: PostStatus, nullable: true }) postStatus!: PostStatus | null;
   @Column({ name: 'environment', type: 'enum', enum: EnvironmentType, nullable: true }) environment!: EnvironmentType | null;
-  @Column({ name: 'authorization_number', length: 49, nullable: true }) authorizationNumber!: string | null;
+  @Column({ name: 'authorization_number', type: 'varchar', length: 49, nullable: true }) authorizationNumber!: string | null;
   @Column({ name: 'authorized_at', type: 'timestamptz', nullable: true }) authorizedAt!: Date | null;
   @Column({ name: 'submitted_at', type: 'timestamptz', nullable: true }) submittedAt!: Date | null;
   @Column({ name: 'sri_retry_count', default: 0 }) sriRetryCount!: number;

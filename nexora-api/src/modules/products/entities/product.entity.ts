@@ -11,7 +11,7 @@ export class Product {
   @Column({ name: 'company_id' }) companyId!: string;
   @Column({ length: 100 }) code!: string;
   @Column({ length: 300 }) name!: string;
-  @Column({ length: 1000, nullable: true }) description!: string | null;
+  @Column({ type: 'varchar', length: 1000, nullable: true }) description!: string | null;
   @Column({ name: 'unit_price', type: 'decimal', precision: 12, scale: 4 }) unitPrice!: number;
   @Column({ name: 'iva_rate', type: 'enum', enum: IvaRate, default: IvaRate.DOCE }) ivaRate!: IvaRate;
   @Column({ name: 'tax_code', type: 'enum', enum: TaxCode, default: TaxCode.IVA }) taxCode!: TaxCode;
