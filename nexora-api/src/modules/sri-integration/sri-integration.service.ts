@@ -9,7 +9,6 @@ import {
   toErrorMessage,
 } from '../../common/errors/nexora.errors';
 
-// ─── URLs confirmadas — Ficha Técnica SRI Ecuador v2.26, sección 7.2 ─────────
 const ENDPOINTS: Record<EnvironmentType, { reception: string; authorization: string }> = {
   [EnvironmentType.PRUEBAS]: {
     reception:    'https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline',
@@ -26,12 +25,10 @@ export interface SriMessage {
   message: string;
   additionalInfo: string;
   type: 'ERROR' | 'ADVERTENCIA' | 'INFORMATIVO';
-  // Traducción al español para el usuario final
   humanMessage: string;
 }
 
 export type SriReceptionState = 'RECIBIDA' | 'DEVUELTA';
-// PPR = procesamiento pendiente de respuesta (ficha técnica SRI)
 export type SriAuthorizationState = 'AUTORIZADO' | 'NO AUTORIZADO' | 'PPR';
 
 export interface SriReceptionResult {
@@ -50,7 +47,6 @@ export interface SriAuthorizationResult {
 }
 
 const TIMEOUT_MS = 30_000;
-// Límite de bytes guardados en DB para rawXml (evita columnas enormes)
 const RAW_XML_MAX_BYTES = 4_000;
 
 @Injectable()
@@ -92,7 +88,6 @@ export class SriIntegrationService {
     return this.parseAuthorization(rawXml);
   }
 
-  // ─── HTTP robusto ────────────────────────────────────────────────────────
   private async postSoap(
     url: string,
     body: string,
@@ -108,7 +103,6 @@ export class SriIntegrationService {
           .pipe(timeout(TIMEOUT_MS)),
       );
 
-      // Validar que la respuesta no está vacía (el SRI a veces devuelve 200 vacío)
       if (!res.data || res.data.trim().length === 0) {
         this.logger.warn(`SRI devolvió respuesta vacía en ${operation}`);
         throw new SriConnectionError(
@@ -125,6 +119,7 @@ export class SriIntegrationService {
         throw err;
       }
       const msg = toErrorMessage(err);
+      this.logger.error(`SRI ${operation} error detallado: ${msg}`);
       if (
         msg.includes('timeout') ||
         msg.includes('ETIMEDOUT') ||
@@ -136,7 +131,6 @@ export class SriIntegrationService {
     }
   }
 
-  // ─── Parser de recepción ─────────────────────────────────────────────────
   private parseReception(rawXml: string): SriReceptionResult {
     const safe = rawXml.substring(0, RAW_XML_MAX_BYTES);
 
@@ -165,6 +159,7 @@ export class SriIntegrationService {
       'validarComprobanteResponse',
       'RespuestaRecepcionComprobante',
     );
+    this.logger.log(`SRI recepción XML raw: ${safe.substring(0, 500)}`);
 
     if (!respuesta) {
       this.logger.warn('Estructura inesperada en respuesta de recepción');
@@ -179,7 +174,6 @@ export class SriIntegrationService {
     return { state, messages, rawXml: safe };
   }
 
-  // ─── Parser de autorización ──────────────────────────────────────────────
   private parseAuthorization(rawXml: string): SriAuthorizationResult {
     const safe = rawXml.substring(0, RAW_XML_MAX_BYTES);
 
@@ -188,8 +182,6 @@ export class SriIntegrationService {
       root = this.xmlParser.parse(rawXml);
     } catch (err) {
       this.logger.error('Error parseando XML autorización', toErrorMessage(err));
-      this.logger.debug('XML raw:', safe);
-      // Si no podemos parsear → asumir PPR y reintentar
       return {
         state: 'PPR',
         authorizationNumber: null,
@@ -217,20 +209,17 @@ export class SriIntegrationService {
     );
     const auth = autorizaciones[0];
 
-    // Sin autorizacion = PPR (el SRI aún está procesando)
     if (!auth) {
       return { state: 'PPR', authorizationNumber: null, authorizedAt: null, environment: null, messages: [], rawXml: safe };
     }
 
     const estadoRaw = (this.str(auth, 'estado') ?? '').toUpperCase().trim();
-    // ⚠️ El SRI usa tanto "PPR" como "EN PROCESO" según la versión del WS
     let state: SriAuthorizationState;
     if (estadoRaw === 'AUTORIZADO') {
       state = 'AUTORIZADO';
     } else if (estadoRaw === 'PPR' || estadoRaw === 'EN PROCESO' || estadoRaw === '') {
       state = 'PPR';
     } else {
-      // RECHAZADO o NO AUTORIZADO = rechazo definitivo
       state = 'NO AUTORIZADO';
     }
 
@@ -251,7 +240,6 @@ export class SriIntegrationService {
     return { state, authorizationNumber: authNumber, authorizedAt, environment, messages, rawXml: safe };
   }
 
-  // ─── Mensajes ────────────────────────────────────────────────────────────
   private extractReceptionMessages(respuesta: unknown): SriMessage[] {
     const comprobantes = this.arr(
       this.nav(respuesta, 'comprobantes', 'comprobante'),
@@ -292,21 +280,18 @@ export class SriIntegrationService {
     };
   }
 
-  // Traducción de errores del SRI a mensajes útiles para el usuario
-  // ⚠️ PENDIENTE: completar con todos los códigos del SRI
   private translateSriError(code: string, original: string): string {
     const map: Record<string, string> = {
-      '43': 'Esta factura ya fue enviada anteriormente. Verifica en el historial.',
+      '43': 'Esta factura ya fue enviada anteriormente.',
       '35': 'La estructura interna de la factura tiene un error técnico.',
       '15': 'El RUC del emisor no está activo en el SRI.',
-      '65': 'La fecha de emisión es demasiado antigua. Corrígela.',
+      '65': 'La fecha de emisión es demasiado antigua.',
       '30': 'El RUC del comprador no es válido.',
       '60': 'Este comprobante fue generado en ambiente de pruebas.',
     };
     return map[code] ?? original;
   }
 
-  // ─── Helpers de navegación ────────────────────────────────────────────────
   private nav(obj: unknown, ...keys: string[]): unknown {
     let cur = obj;
     for (const k of keys) {
@@ -335,7 +320,6 @@ export class SriIntegrationService {
     return [val];
   }
 
-  // ─── Envelopes SOAP ──────────────────────────────────────────────────────
   private buildReceptionSoap(xmlBase64: string): string {
     return (
       '<?xml version="1.0" encoding="UTF-8"?>' +

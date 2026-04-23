@@ -96,3 +96,14 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+
+primero este comando 
+docker-compose up -d postgres redis
+luego este
+npm run start:dev
+
+Amor, Docker se reinició y perdió los datos. Necesitas recrear los volúmenes con las credenciales correctas. Ejecuta en CMD:
+cmddocker-compose down -v
+docker-compose up -d postgres redis
+Espera 5 segundos y luego reinicia el backend. Los datos se perdieron pero es solo el ambiente de desarrollo — dime cuando esté corriendo.

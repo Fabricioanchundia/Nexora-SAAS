@@ -48,17 +48,14 @@ export class InvoicesService {
   ) {}
 
   async create(dto: CreateInvoiceDto, companyId: string, user: User): Promise<Invoice> {
-    // 1. Cargar empresa y cliente
     const company = await this.companyRepo.findOne({ where: { id: companyId } });
     if (!company) throw new NotFoundException('Empresa no encontrada');
 
     const customer = await this.customerRepo.findOne({ where: { id: dto.customerId, companyId } });
     if (!customer) throw new NotFoundException('Cliente no encontrado');
 
-    // 2. Pre-validación SRI
     this.preValidator.validate(dto, company, customer);
 
-    // 3. Idempotencia
     if (dto.idempotencyKey) {
       const existing = await this.invoiceRepo.findOne({ where: { idempotencyKey: dto.idempotencyKey, companyId } });
       if (existing) {
@@ -67,7 +64,6 @@ export class InvoicesService {
       }
     }
 
-    // 4. Calcular totales
     const totals = this.calculateTotals(dto.items);
 
     const qr = this.dataSource.createQueryRunner();
@@ -75,7 +71,6 @@ export class InvoicesService {
     await qr.startTransaction();
 
     try {
-      // 5. Obtener y reservar secuencial atómicamente
       await qr.manager.createQueryBuilder()
         .update(Company).set({ nextSequential: () => 'next_sequential + 1' })
         .where('id = :id', { id: companyId }).execute();
@@ -84,9 +79,11 @@ export class InvoicesService {
       if (!refreshed) throw new Error('Error cargando empresa');
       const sequential = refreshed.nextSequential - 1;
 
-      // 6. Generar clave de acceso
+      // Fix zona horaria — agregar mediodía para evitar desfase UTC-5
+      const issueDate = new Date(dto.issueDate + 'T12:00:00');
+
       const accessKey = this.accessKeyService.generate({
-        issueDate:         new Date(dto.issueDate),
+        issueDate,
         documentType:      DocumentType.FACTURA,
         ruc:               company.ruc,
         environment:       company.sriEnvironment,
@@ -97,7 +94,6 @@ export class InvoicesService {
         emissionType:      company.emissionType,
       });
 
-      // 7. Crear factura
       const invoice = qr.manager.create(Invoice, {
         companyId,
         customerId:       dto.customerId,
@@ -105,7 +101,7 @@ export class InvoicesService {
         sequential:       this.buildSequential(company.establishmentCode, company.emissionPoint, sequential),
         accessKey,
         idempotencyKey:   dto.idempotencyKey ?? null,
-        issueDate:        new Date(dto.issueDate),
+        issueDate,
         notes:            dto.notes ?? null,
         guiaRemision:     dto.guiaRemision ?? null,
         paymentMethods:   dto.paymentMethods ?? null,
@@ -114,7 +110,6 @@ export class InvoicesService {
       });
       const savedInvoice = await qr.manager.save(Invoice, invoice);
 
-      // 8. Guardar ítems
       const items = dto.items.map((i) =>
         qr.manager.create(InvoiceItem, {
           invoiceId:     savedInvoice.id,
@@ -132,7 +127,6 @@ export class InvoicesService {
       );
       await qr.manager.save(InvoiceItem, items);
 
-      // 9. Crear TaxDocument
       const taxDoc = qr.manager.create(TaxDocument, {
         invoiceId: savedInvoice.id,
         accessKey,
@@ -144,7 +138,6 @@ export class InvoicesService {
       });
       const savedTaxDoc = await qr.manager.save(TaxDocument, taxDoc);
 
-      // 10. Evento inicial
       const event = qr.manager.create(TaxDocumentEvent, {
         taxDocumentId: savedTaxDoc.id,
         eventType:     TaxDocumentEventType.CREATED,
@@ -155,7 +148,6 @@ export class InvoicesService {
 
       await qr.commitTransaction();
 
-      // 11. Encolar firma
       await this.signingQueue.add(
         JobName.SIGN_DOCUMENT,
         { invoiceId: savedInvoice.id, taxDocumentId: savedTaxDoc.id, companyId },
@@ -176,7 +168,6 @@ export class InvoicesService {
     }
   }
 
-  // ─── Descargar PDF ──────────────────────────────────────────────────────────
   async downloadPdf(id: string, companyId: string): Promise<{ buffer: Buffer; filename: string }> {
     const inv = await this.findOne(id, companyId);
     if (!inv.taxDocument?.authorizationNumber) {
@@ -191,7 +182,6 @@ export class InvoicesService {
     return { buffer, filename: `factura-${inv.sequential?.replaceAll('/', '-') ?? id}.pdf` };
   }
 
-  // ─── Descargar XML ──────────────────────────────────────────────────────────
   async downloadXml(id: string, companyId: string): Promise<{ buffer: Buffer; filename: string }> {
     const inv = await this.findOne(id, companyId);
     if (!inv.taxDocument?.signedXmlPath) {
@@ -201,7 +191,6 @@ export class InvoicesService {
     return { buffer, filename: `factura-${inv.sequential?.replaceAll('/', '-') ?? id}.xml` };
   }
 
-  // ─── Cancelar factura (solo DRAFT) ─────────────────────────────────────────
   async cancel(id: string, companyId: string, userId: string): Promise<{ message: string }> {
     const inv = await this.findOne(id, companyId);
     if (inv.status !== InvoiceStatus.DRAFT) {
@@ -212,7 +201,6 @@ export class InvoicesService {
     return { message: 'Factura cancelada.' };
   }
 
-  // ─── Consultas ──────────────────────────────────────────────────────────────
   async findAll(companyId: string, page = 1, limit = 20, status?: string) {
     const where: Record<string, unknown> = { companyId };
     if (status) where['status'] = status;

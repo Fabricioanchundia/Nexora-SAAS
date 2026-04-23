@@ -3,7 +3,7 @@ import { create } from 'xmlbuilder2';
 import Decimal from 'decimal.js';
 import { Invoice } from '../invoices/entities/invoice.entity';
 import { InvoiceItem } from '../invoices/entities/invoice-item.entity';
-import { formatDateSri } from '../../common/utils/date.util';
+import { formatDateSri, parseDateLocal } from '../../common/utils/date.util';
 import {
   SRI_XML_VERSION,
   DocumentType,
@@ -24,11 +24,11 @@ export class XmlGenerationService {
   }
 
   private validateRelations(invoice: Invoice): void {
-    if (!invoice.company)   throw new Error('Factura sin empresa cargada');
-    if (!invoice.customer)  throw new Error('Factura sin cliente cargado');
+    if (!invoice.company)       throw new Error('Factura sin empresa cargada');
+    if (!invoice.customer)      throw new Error('Factura sin cliente cargado');
     if (!invoice.items?.length) throw new Error('Factura sin ítems cargados');
-    if (!invoice.accessKey) throw new Error('Factura sin clave de acceso');
-    if (!invoice.sequential) throw new Error('Factura sin número secuencial');
+    if (!invoice.accessKey)     throw new Error('Factura sin clave de acceso');
+    if (!invoice.sequential)    throw new Error('Factura sin número secuencial');
   }
 
   private build(invoice: Invoice): string {
@@ -46,9 +46,7 @@ export class XmlGenerationService {
     this.buildInfoAdicional(doc, customer, invoice);
 
     const xml = doc.end({ prettyPrint: false });
-    this.logger.debug(
-      `XML generado: ${invoice.sequential} (${xml.length} bytes)`,
-    );
+    this.logger.debug(`XML generado: ${invoice.sequential} (${xml.length} bytes)`);
     return xml;
   }
 
@@ -64,9 +62,7 @@ export class XmlGenerationService {
     it.ele('ambiente').txt(String(company.sriEnvironment));
     it.ele('tipoEmision').txt(String(company.emissionType));
     it.ele('razonSocial').txt(this.sanitize(company.businessName));
-    it.ele('nombreComercial').txt(
-      this.sanitize(company.tradeName ?? company.businessName),
-    );
+    it.ele('nombreComercial').txt(this.sanitize(company.tradeName ?? company.businessName));
     it.ele('ruc').txt(company.ruc);
     it.ele('claveAcceso').txt(invoice.accessKey!);
     it.ele('codDoc').txt(DocumentType.FACTURA);
@@ -88,10 +84,8 @@ export class XmlGenerationService {
     items: InvoiceItem[],
   ): void {
     const inf = doc.ele('infoFactura');
-    inf.ele('fechaEmision').txt(formatDateSri(new Date(invoice.issueDate)));
-    inf.ele('dirEstablecimiento').txt(
-      this.sanitize(company.establishmentAddress ?? company.address ?? ''),
-    );
+    inf.ele('fechaEmision').txt(formatDateSri(parseDateLocal(invoice.issueDate)));
+    inf.ele('dirEstablecimiento').txt(this.sanitize(company.establishmentAddress ?? company.address ?? ''));
     inf.ele('obligadoContabilidad').txt(company.obligadoContabilidad ? 'SI' : 'NO');
     inf.ele('tipoIdentificacionComprador').txt(String(customer.identificationType));
     inf.ele('razonSocialComprador').txt(this.sanitize(customer.fullName));
@@ -106,16 +100,12 @@ export class XmlGenerationService {
       .toDecimalPlaces(2);
 
     inf.ele('totalSinImpuestos').txt(totalSinImp.toFixed(2));
-    inf.ele('totalDescuento').txt(
-      new Decimal(invoice.discountTotal).toDecimalPlaces(2).toFixed(2),
-    );
+    inf.ele('totalDescuento').txt(new Decimal(invoice.discountTotal).toDecimalPlaces(2).toFixed(2));
 
     this.buildTotalConImpuestos(inf, items);
 
     inf.ele('propina').txt('0.00');
-    inf.ele('importeTotal').txt(
-      new Decimal(invoice.total).toDecimalPlaces(2).toFixed(2),
-    );
+    inf.ele('importeTotal').txt(new Decimal(invoice.total).toDecimalPlaces(2).toFixed(2));
     inf.ele('moneda').txt(SRI_CURRENCY);
 
     this.buildPagos(inf, invoice);
@@ -142,9 +132,7 @@ export class XmlGenerationService {
     for (const pago of formasPago) {
       const p = pagos.ele('pago');
       p.ele('formaPago').txt(String(pago.code));
-      p.ele('total').txt(
-        new Decimal(pago.total).toDecimalPlaces(2).toFixed(2),
-      );
+      p.ele('total').txt(new Decimal(pago.total).toDecimalPlaces(2).toFixed(2));
       if (pago.term) {
         p.ele('plazo').txt(String(pago.term));
         p.ele('unidadTiempo').txt(pago.timeUnit ?? DEFAULT_TIME_UNIT);
@@ -162,32 +150,18 @@ export class XmlGenerationService {
         d.ele('codigoAuxiliar').txt(this.trunc(item.auxiliaryCode, 25));
       }
 
-      d.ele('descripcion').txt(
-        this.sanitize(this.trunc(item.description, 300)),
-      );
-      d.ele('cantidad').txt(
-        new Decimal(item.quantity).toDecimalPlaces(6).toFixed(6),
-      );
-      d.ele('precioUnitario').txt(
-        new Decimal(item.unitPrice).toDecimalPlaces(6).toFixed(6),
-      );
-      d.ele('descuento').txt(
-        new Decimal(item.discount ?? 0).toDecimalPlaces(2).toFixed(2),
-      );
-      d.ele('precioTotalSinImpuesto').txt(
-        new Decimal(item.subtotal).toDecimalPlaces(2).toFixed(2),
-      );
+      d.ele('descripcion').txt(this.sanitize(this.trunc(item.description, 300)));
+      d.ele('cantidad').txt(new Decimal(item.quantity).toDecimalPlaces(6).toFixed(6));
+      d.ele('precioUnitario').txt(new Decimal(item.unitPrice).toDecimalPlaces(6).toFixed(6));
+      d.ele('descuento').txt(new Decimal(item.discount ?? 0).toDecimalPlaces(2).toFixed(2));
+      d.ele('precioTotalSinImpuesto').txt(new Decimal(item.subtotal).toDecimalPlaces(2).toFixed(2));
 
       const imps = d.ele('impuestos').ele('impuesto');
       imps.ele('codigo').txt(TaxGroupCode.IVA);
       imps.ele('codigoPorcentaje').txt(String(item.ivaRate));
       imps.ele('tarifa').txt(IVA_CODE_TO_RATE[String(item.ivaRate)] ?? '0');
-      imps.ele('baseImponible').txt(
-        new Decimal(item.subtotal).toDecimalPlaces(2).toFixed(2),
-      );
-      imps.ele('valor').txt(
-        new Decimal(item.taxAmount).toDecimalPlaces(2).toFixed(2),
-      );
+      imps.ele('baseImponible').txt(new Decimal(item.subtotal).toDecimalPlaces(2).toFixed(2));
+      imps.ele('valor').txt(new Decimal(item.taxAmount).toDecimalPlaces(2).toFixed(2));
     }
   }
 
@@ -206,9 +180,7 @@ export class XmlGenerationService {
     }
   }
 
-  private groupByIva(
-    items: InvoiceItem[],
-  ): Record<string, { base: Decimal; tax: Decimal }> {
+  private groupByIva(items: InvoiceItem[]): Record<string, { base: Decimal; tax: Decimal }> {
     const g: Record<string, { base: Decimal; tax: Decimal }> = {};
     for (const item of items) {
       const k = String(item.ivaRate);

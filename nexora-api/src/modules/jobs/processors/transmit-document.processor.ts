@@ -57,11 +57,9 @@ export class TransmitDocumentProcessor {
     private readonly rideQueue: Queue,
   ) {}
 
-  // ─── Job 1: Transmitir al SRI ──────────────────────────────────────────────
   @Process({ name: JobName.TRANSMIT_DOCUMENT, concurrency: 3 })
   async handleTransmit(job: Job<TransmitJobData>): Promise<void> {
-    const { invoiceId, taxDocumentId, signedXmlPath, environment } =
-      job.data;
+    const { invoiceId, taxDocumentId, signedXmlPath, environment } = job.data;
 
     this.logger.log(
       `[TRANSMISIÓN] invoice=${invoiceId} intento=${job.attemptsMade + 1}`,
@@ -73,7 +71,6 @@ export class TransmitDocumentProcessor {
       metadata: { attempt: job.attemptsMade, jobId: String(job.id) },
     });
 
-    // Leer XML firmado
     let xmlBuf: Buffer;
     try {
       xmlBuf = await this.storageSvc.download(signedXmlPath);
@@ -81,7 +78,6 @@ export class TransmitDocumentProcessor {
       throw new Error(`No se pudo leer XML firmado: ${toErrorMessage(err)}`);
     }
 
-    // Enviar al SRI
     let result: Awaited<ReturnType<SriIntegrationService['submitDocument']>>;
     try {
       result = await this.sriSvc.submitDocument(
@@ -89,7 +85,6 @@ export class TransmitDocumentProcessor {
         environment,
       );
     } catch (err) {
-      // SriTimeoutError y SriConnectionError son reintentables
       const message = toErrorMessage(err);
       await this.taxDocRepo.update(taxDocumentId, {
         sriStatus: TaxDocumentStatus.NOT_RECEIVED,
@@ -101,11 +96,32 @@ export class TransmitDocumentProcessor {
         errorDetail: message,
         metadata: { retryable: isRetryable(err) },
       });
-      throw err; // BullMQ reintenta
+      throw err;
     }
 
-    // SRI devolvió DEVUELTA — error en los datos, NO reintentar
+    // Código 43 = clave ya registrada — pasar directo a polling
     if (result.state === 'DEVUELTA') {
+      const yaRegistrada = result.messages.some((m) => m.identifier === '43');
+      if (yaRegistrada) {
+        this.logger.log(
+          `[TRANSMISIÓN] Clave ya registrada, pasando a polling: invoice=${invoiceId}`,
+        );
+        await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.SUBMITTED });
+        await this.selfQueue.add(
+          JobName.POLL_AUTHORIZATION,
+          { ...job.data, pollAttempt: 0 } as PollJobData,
+          {
+            jobId: `poll-${invoiceId}-0`,
+            delay: 5000,
+            attempts: 1,
+            removeOnComplete: false,
+            removeOnFail: false,
+          },
+        );
+        return;
+      }
+
+      // Otro error — rechazo definitivo
       const errorMessages = result.messages.map((m) => m.message);
       const errorStr = errorMessages.join(' | ');
 
@@ -124,18 +140,15 @@ export class TransmitDocumentProcessor {
         },
       });
 
-      await this.invoiceRepo.update(invoiceId, {
-        status: InvoiceStatus.REJECTED,
-      });
+      await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.REJECTED });
 
       this.logger.warn(
         `[TRANSMISIÓN] DEVUELTA por SRI: invoice=${invoiceId} | ${errorStr}`,
       );
-      // NO re-lanzar — rechazo definitivo
       return;
     }
 
-    // RECIBIDA — actualizar estado y encolar polling separado (no bloquea)
+    // RECIBIDA — encolar polling
     await this.taxDocSvc.transition({
       taxDocumentId,
       toStatus: TaxDocumentStatus.RECEIVED,
@@ -149,17 +162,13 @@ export class TransmitDocumentProcessor {
       },
     });
 
-    await this.invoiceRepo.update(invoiceId, {
-      status: InvoiceStatus.SUBMITTED,
-    });
+    await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.SUBMITTED });
 
-    // El worker TERMINA aquí — polling es un job separado con delay
-    // Esto evita bloquear el worker durante minutos esperando al SRI
     await this.selfQueue.add(
       JobName.POLL_AUTHORIZATION,
       { ...job.data, pollAttempt: 0 } as PollJobData,
       {
-        jobId: `poll-${invoiceId}-0`, // idempotente
+        jobId: `poll-${invoiceId}-0`,
         delay: POLL_BASE_DELAY_MS,
         attempts: 1,
         removeOnComplete: false,
@@ -172,11 +181,9 @@ export class TransmitDocumentProcessor {
     );
   }
 
-  // ─── Job 2: Consultar autorización (no bloquea workers) ───────────────────
   @Process({ name: JobName.POLL_AUTHORIZATION, concurrency: 10 })
   async handlePoll(job: Job<PollJobData>): Promise<void> {
-    const { invoiceId, taxDocumentId, accessKey, environment, pollAttempt } =
-      job.data;
+    const { invoiceId, taxDocumentId, accessKey, environment, pollAttempt } = job.data;
 
     this.logger.log(
       `[POLL] invoice=${invoiceId} intento=${pollAttempt + 1}/${MAX_POLL_ATTEMPTS}`,
@@ -187,11 +194,7 @@ export class TransmitDocumentProcessor {
       auth = await this.sriSvc.checkAuthorization(accessKey, environment);
     } catch (err) {
       const message = toErrorMessage(err);
-      this.logger.warn(
-        `[POLL] Error consultando SRI invoice=${invoiceId}: ${message}`,
-      );
-
-      // Si aún quedan intentos, re-encolar con delay mayor
+      this.logger.warn(`[POLL] Error consultando SRI invoice=${invoiceId}: ${message}`);
       if (pollAttempt + 1 < MAX_POLL_ATTEMPTS) {
         await this.enqueueNextPoll(job.data, pollAttempt + 1);
       } else {
@@ -209,7 +212,6 @@ export class TransmitDocumentProcessor {
       metadata: { pollAttempt: pollAttempt + 1, sriState: auth.state },
     });
 
-    // PPR = en proceso — re-encolar siguiente poll
     if (auth.state === 'PPR') {
       if (pollAttempt + 1 >= MAX_POLL_ATTEMPTS) {
         this.logger.warn(
@@ -224,7 +226,6 @@ export class TransmitDocumentProcessor {
       return;
     }
 
-    // AUTORIZADO
     if (auth.state === 'AUTORIZADO') {
       await this.taxDocSvc.transition({
         taxDocumentId,
@@ -244,11 +245,8 @@ export class TransmitDocumentProcessor {
         },
       });
 
-      await this.invoiceRepo.update(invoiceId, {
-        status: InvoiceStatus.AUTHORIZED,
-      });
+      await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.AUTHORIZED });
 
-      // Encolar generación de RIDE
       await this.rideQueue.add(
         JobName.GENERATE_RIDE,
         { invoiceId, taxDocumentId, companyId: job.data.companyId },
@@ -267,7 +265,6 @@ export class TransmitDocumentProcessor {
       return;
     }
 
-    // NO AUTORIZADO
     const errorStr = auth.messages.map((m) => m.message).join(' | ');
     await this.taxDocSvc.transition({
       taxDocumentId,
@@ -283,20 +280,12 @@ export class TransmitDocumentProcessor {
       },
     });
 
-    await this.invoiceRepo.update(invoiceId, {
-      status: InvoiceStatus.REJECTED,
-    });
+    await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.REJECTED });
 
-    this.logger.warn(
-      `[POLL] NO AUTORIZADO: invoice=${invoiceId} | ${errorStr}`,
-    );
+    this.logger.warn(`[POLL] NO AUTORIZADO: invoice=${invoiceId} | ${errorStr}`);
   }
 
-  private async enqueueNextPoll(
-    data: TransmitJobData,
-    nextAttempt: number,
-  ): Promise<void> {
-    // Delay creciente: 8s, 16s, 24s, 32s...
+  private async enqueueNextPoll(data: TransmitJobData, nextAttempt: number): Promise<void> {
     const delay = POLL_BASE_DELAY_MS * (nextAttempt + 1);
     await this.selfQueue.add(
       JobName.POLL_AUTHORIZATION,
