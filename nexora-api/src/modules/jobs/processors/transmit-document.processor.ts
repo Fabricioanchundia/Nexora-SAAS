@@ -99,7 +99,6 @@ export class TransmitDocumentProcessor {
       throw err;
     }
 
-    // Código 43 = clave ya registrada — pasar directo a polling
     if (result.state === 'DEVUELTA') {
       const yaRegistrada = result.messages.some((m) => m.identifier === '43');
       if (yaRegistrada) {
@@ -121,7 +120,6 @@ export class TransmitDocumentProcessor {
         return;
       }
 
-      // Otro error — rechazo definitivo
       const errorMessages = result.messages.map((m) => m.message);
       const errorStr = errorMessages.join(' | ');
 
@@ -141,14 +139,10 @@ export class TransmitDocumentProcessor {
       });
 
       await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.REJECTED });
-
-      this.logger.warn(
-        `[TRANSMISIÓN] DEVUELTA por SRI: invoice=${invoiceId} | ${errorStr}`,
-      );
+      this.logger.warn(`[TRANSMISIÓN] DEVUELTA por SRI: invoice=${invoiceId} | ${errorStr}`);
       return;
     }
 
-    // RECIBIDA — encolar polling
     await this.taxDocSvc.transition({
       taxDocumentId,
       toStatus: TaxDocumentStatus.RECEIVED,
@@ -176,22 +170,19 @@ export class TransmitDocumentProcessor {
       },
     );
 
-    this.logger.log(
-      `[TRANSMISIÓN] RECIBIDA por SRI, polling encolado: invoice=${invoiceId}`,
-    );
+    this.logger.log(`[TRANSMISIÓN] RECIBIDA por SRI, polling encolado: invoice=${invoiceId}`);
   }
 
   @Process({ name: JobName.POLL_AUTHORIZATION, concurrency: 10 })
   async handlePoll(job: Job<PollJobData>): Promise<void> {
     const { invoiceId, taxDocumentId, accessKey, environment, pollAttempt } = job.data;
 
-    this.logger.log(
-      `[POLL] invoice=${invoiceId} intento=${pollAttempt + 1}/${MAX_POLL_ATTEMPTS}`,
-    );
+    this.logger.log(`[POLL] invoice=${invoiceId} intento=${pollAttempt + 1}/${MAX_POLL_ATTEMPTS}`);
 
     let auth: SriAuthorizationResult;
     try {
       auth = await this.sriSvc.checkAuthorization(accessKey, environment);
+      this.logger.log(`[POLL] Respuesta SRI estado=${auth.state} messages=${JSON.stringify(auth.messages)} rawXml=${auth.rawXml}`);
     } catch (err) {
       const message = toErrorMessage(err);
       this.logger.warn(`[POLL] Error consultando SRI invoice=${invoiceId}: ${message}`);
@@ -214,9 +205,7 @@ export class TransmitDocumentProcessor {
 
     if (auth.state === 'PPR') {
       if (pollAttempt + 1 >= MAX_POLL_ATTEMPTS) {
-        this.logger.warn(
-          `[POLL] Max intentos alcanzado invoice=${invoiceId}. Quedó en RECEIVED.`,
-        );
+        this.logger.warn(`[POLL] Max intentos alcanzado invoice=${invoiceId}.`);
         await this.taxDocRepo.update(taxDocumentId, {
           lastError: `Sin respuesta definitiva del SRI tras ${MAX_POLL_ATTEMPTS} consultas`,
         });
@@ -259,9 +248,7 @@ export class TransmitDocumentProcessor {
         },
       );
 
-      this.logger.log(
-        `[POLL] AUTORIZADO: invoice=${invoiceId} auth=${auth.authorizationNumber}`,
-      );
+      this.logger.log(`[POLL] AUTORIZADO: invoice=${invoiceId} auth=${auth.authorizationNumber}`);
       return;
     }
 
@@ -281,7 +268,6 @@ export class TransmitDocumentProcessor {
     });
 
     await this.invoiceRepo.update(invoiceId, { status: InvoiceStatus.REJECTED });
-
     this.logger.warn(`[POLL] NO AUTORIZADO: invoice=${invoiceId} | ${errorStr}`);
   }
 
@@ -298,8 +284,6 @@ export class TransmitDocumentProcessor {
         removeOnFail: false,
       },
     );
-    this.logger.log(
-      `[POLL] Próximo poll en ${delay}ms: invoice=${data.invoiceId} intento=${nextAttempt + 1}`,
-    );
+    this.logger.log(`[POLL] Próximo poll en ${delay}ms: invoice=${data.invoiceId} intento=${nextAttempt + 1}`);
   }
 }

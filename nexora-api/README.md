@@ -110,3 +110,6 @@ Espera 5 segundos y luego reinicia el backend. Los datos se perdieron pero es so
 
 contrase;a del hosting 
 Nexora2024#Manta
+
+contrase;a del certficado
+Fabricio7#
