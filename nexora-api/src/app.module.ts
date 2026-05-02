@@ -46,7 +46,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
         logging: cfg.get<boolean>('database.logging'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         // ⚠️ synchronize: true solo para desarrollo — en producción usar migraciones
-        synchronize: cfg.get<string>('app.nodeEnv') !== 'production',
+        synchronize: true,
         autoLoadEntities: true,
       }),
     }),

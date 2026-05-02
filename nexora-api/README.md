@@ -107,3 +107,6 @@ Amor, Docker se reinició y perdió los datos. Necesitas recrear los volúmenes 
 cmddocker-compose down -v
 docker-compose up -d postgres redis
 Espera 5 segundos y luego reinicia el backend. Los datos se perdieron pero es solo el ambiente de desarrollo — dime cuando esté corriendo.
+
+contrase;a del hosting 
+Nexora2024#Manta
