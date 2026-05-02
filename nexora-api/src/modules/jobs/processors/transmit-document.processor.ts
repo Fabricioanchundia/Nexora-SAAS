@@ -100,7 +100,7 @@ export class TransmitDocumentProcessor {
     }
 
     if (result.state === 'DEVUELTA') {
-      const yaRegistrada = result.messages.some((m) => m.identifier === '43');
+      const yaRegistrada = result.messages.some((m) => m.identifier === '43' || m.identifier === '45');
       if (yaRegistrada) {
         this.logger.log(
           `[TRANSMISIÓN] Clave ya registrada, pasando a polling: invoice=${invoiceId}`,
