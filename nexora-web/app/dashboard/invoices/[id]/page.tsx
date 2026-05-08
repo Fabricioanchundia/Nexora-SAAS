@@ -55,16 +55,11 @@ export default function InvoiceDetailPage() {
   const handleDownload = async (type: 'pdf' | 'xml') => {
     if (!invoice) return;
     try {
-      const token = localStorage.getItem('nexora_token');
-      const companyId = localStorage.getItem('nexora_company_id');
-      const response = await fetch(`http://177.7.58.244/api/v1/invoices/${invoice.id}/${type}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'x-company-id': companyId || '',
-        },
+      const response = await api.get(`/invoices/${invoice.id}/${type}`, {
+        responseType: 'blob',
       });
-      if (!response.ok) throw new Error('Error al descargar');
-      const blob = await response.blob();
+      const mimeType = type === 'pdf' ? 'application/pdf' : 'application/xml';
+      const blob = new Blob([response.data], { type: mimeType });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
