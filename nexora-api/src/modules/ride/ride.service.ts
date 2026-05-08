@@ -81,12 +81,21 @@ export class RideService {
     const y = 195;
     const W = doc.page.width - 80;
 
+    const tipoIdLabel: Record<string, string> = {
+      '04': 'RUC',
+      '05': 'CÉDULA',
+      '06': 'RUC',
+      '07': 'PASAPORTE',
+      '08': 'ID EXTERIOR',
+    };
+    const tipoLabel = tipoIdLabel[inv.customer.identificationType] || inv.customer.identificationType;
+
     doc.rect(40, y, W, 45).stroke();
     doc.fontSize(9).font('Helvetica-Bold').text('DATOS DEL COMPRADOR', 48, y + 5);
     doc.fontSize(8).font('Helvetica-Bold').text('Razón Social:', 48, y + 17, { continued: true })
        .font('Helvetica').text(` ${inv.customer.fullName}`);
     doc.font('Helvetica-Bold')
-       .text(`${inv.customer.identificationType}:`, 48, y + 28, { continued: true })
+       .text(`${tipoLabel}:`, 48, y + 28, { continued: true })
        .font('Helvetica').text(` ${inv.customer.identification}`);
     if (inv.customer.email)
        doc.font('Helvetica-Bold').text('Email:', 200, y + 28, { continued: true })
@@ -122,12 +131,12 @@ export class RideService {
       }
       doc.rect(40, currentY, W, rowH).stroke();
       doc.fontSize(7).font('Helvetica');
-      doc.text(item.productCode ?? '',                       cols.cod,   currentY + 3, { width: 58 });
-      doc.text(item.description ?? '',                        cols.desc,  currentY + 3, { width: 220 });
-      doc.text(Number(item.quantity).toFixed(2),             cols.cant,  currentY + 3, { width: 45, align: 'right' });
-      doc.text(`$${Number(item.unitPrice).toFixed(4)}`,      cols.pu,    currentY + 3, { width: 45, align: 'right' });
-      doc.text(`$${Number(item.discount).toFixed(2)}`,       cols.desc2, currentY + 3, { width: 45, align: 'right' });
-      doc.text(`$${Number(item.subtotal).toFixed(2)}`,       cols.total, currentY + 3, { width: 50, align: 'right' });
+      doc.text(item.productCode ?? '',                  cols.cod,   currentY + 3, { width: 58 });
+      doc.text(item.description ?? '',                   cols.desc,  currentY + 3, { width: 220 });
+      doc.text(Number(item.quantity).toFixed(2),        cols.cant,  currentY + 3, { width: 45, align: 'right' });
+      doc.text(`$${Number(item.unitPrice).toFixed(4)}`, cols.pu,    currentY + 3, { width: 45, align: 'right' });
+      doc.text(`$${Number(item.discount).toFixed(2)}`,  cols.desc2, currentY + 3, { width: 45, align: 'right' });
+      doc.text(`$${Number(item.subtotal).toFixed(2)}`,  cols.total, currentY + 3, { width: 50, align: 'right' });
       currentY += rowH;
     }
 
