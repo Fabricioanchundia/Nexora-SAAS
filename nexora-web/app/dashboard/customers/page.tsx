@@ -19,7 +19,7 @@ const schema = z.object({
   identificationType: z.enum(['04', '05', '06', '07', '08']),
   identification: z.string().min(1, 'Requerido'),
   fullName:       z.string().min(2, 'Requerido'),
-  email:          z.string().email('Email inválido').optional().or(z.literal('')),
+  email:          z.email('Email inválido').optional().or(z.literal('')),
   phone:          z.string().optional(),
   address:        z.string().optional(),
 });

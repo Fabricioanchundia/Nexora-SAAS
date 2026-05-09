@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
+import { ScheduleModule } from '@nestjs/schedule';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
@@ -24,6 +25,8 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+// ── Subscriptions (planes y cuotas) ───────────────────────────────────────────
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -32,6 +35,9 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
       envFilePath: '.env',
       load: [appConfig, databaseConfig, jwtConfig, redisConfig, storageConfig],
     }),
+
+    // ScheduleModule requerido por SubscriptionsModule (cron de expiración diario)
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -45,7 +51,8 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
         ssl: cfg.get<boolean>('database.ssl'),
         logging: cfg.get<boolean>('database.logging'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        // ⚠️ synchronize: true solo para desarrollo — en producción usar migraciones
+        // synchronize:true crea las tablas plans y subscriptions automáticamente al arrancar
+        // No se requiere migration:run manualmente
         synchronize: true,
         autoLoadEntities: true,
       }),
@@ -62,6 +69,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
       }),
     }),
 
+    // Módulos existentes — sin cambios
     AuthModule,
     UsersModule,
     CompaniesModule,
@@ -79,6 +87,11 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
     StorageModule,
     JobsModule,
     AuditLogsModule,
+
+    // ── Nuevo módulo de suscripciones ─────────────────────────────────────────
+    // Al arrancar: crea tablas plans + subscriptions (via synchronize:true)
+    //              y hace seed automático de los 4 planes (FREE/STARTER/PRO/ENTERPRISE)
+    SubscriptionsModule,
   ],
 })
 export class AppModule {}

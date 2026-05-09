@@ -61,6 +61,20 @@ export default function NewInvoicePage() {
     });
   }, []);
 
+  // S2004: Extract product lookup to reduce nesting depth
+  const getProductUpdate = useCallback((value: string | number) => {
+    const p = products.find(pr => pr.id === value);
+    if (!p) return null;
+    return {
+      productId:   p.id,
+      productCode: p.code,
+      description: p.name,
+      // S7773: Number.parseFloat
+      unitPrice:   Number.parseFloat(String(p.unitPrice)),
+      ivaRate:     p.ivaRate,
+    };
+  }, [products]);
+
   const addItem = useCallback(() => {
     if (products.length === 0) return;
     const p = products[0];
@@ -81,21 +95,13 @@ export default function NewInvoicePage() {
     setItems(prev => prev.map(item => {
       if (item.itemKey !== key) return item;
       if (field === 'productId') {
-        const p = products.find(pr => pr.id === value);
-        if (!p) return item;
-        return {
-          ...item,
-          productId:   p.id,
-          productCode: p.code,
-          description: p.name,
-          // S7773: Number.parseFloat
-          unitPrice:   Number.parseFloat(String(p.unitPrice)),
-          ivaRate:     p.ivaRate,
-        };
+        const productUpdate = getProductUpdate(value);
+        if (!productUpdate) return item;
+        return { ...item, ...productUpdate };
       }
       return { ...item, [field]: value };
     }));
-  }, [products]);
+  }, [getProductUpdate]);
 
   const removeItem = useCallback((key: string) => {
     setItems(prev => prev.filter(i => i.itemKey !== key));

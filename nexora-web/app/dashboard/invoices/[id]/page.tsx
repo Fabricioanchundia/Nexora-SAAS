@@ -60,14 +60,14 @@ export default function InvoiceDetailPage() {
       });
       const mimeType = type === 'pdf' ? 'application/pdf' : 'application/xml';
       const blob = new Blob([response.data], { type: mimeType });
-      const url = window.URL.createObjectURL(blob);
+      const url = globalThis.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `factura-${invoice.sequential}.${type}`;
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      a.remove();
+      globalThis.URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
       alert('Error al descargar el archivo');
@@ -160,8 +160,11 @@ export default function InvoiceDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {invoice.items.map((item, i) => (
-              <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+            {invoice.items.map((item) => (
+              <tr
+                key={`${item.description}-${item.quantity}-${item.unitPrice}-${item.subtotal}-${item.taxAmount}-${item.ivaRate}`}
+                className="border-b border-slate-50 hover:bg-slate-50"
+              >
                 <td className="px-4 py-3 text-slate-700">{item.description}</td>
                 <td className="px-4 py-3 text-right text-slate-600">{item.quantity}</td>
                 <td className="px-4 py-3 text-right text-slate-600">${Number(item.unitPrice).toFixed(2)}</td>

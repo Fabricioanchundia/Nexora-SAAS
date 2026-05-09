@@ -119,24 +119,35 @@ export default function ProductsPage() {
     );
   } else {
     tableBody = products.map(p => (
-      <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-        <td className="px-5 py-3.5">
-          <span className="font-mono text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{p.code}</span>
-        </td>
-        <td className="px-5 py-3.5">
-          <p className="font-medium text-slate-800">{p.name}</p>
-          {p.description && <p className="text-xs text-slate-400 mt-0.5 truncate max-w-xs">{p.description}</p>}
-        </td>
-        <td className="px-5 py-3.5 font-semibold text-slate-800">${Number(p.unitPrice).toFixed(2)}</td>
-        <td className="px-5 py-3.5">
-          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${p.ivaRate === '0' ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-            {IVA_LABELS[p.ivaRate] ?? p.ivaRate}
-          </span>
-        </td>
-        <td className="px-5 py-3.5 text-slate-600 text-sm">
-          ${(Number(p.unitPrice) * (1 + (p.ivaRate === '2' ? 0.12 : p.ivaRate === '4' ? 0.15 : 0))).toFixed(2)}
-        </td>
-      </tr>
+      (() => {
+        let ivaMultiplier = 0;
+        if (p.ivaRate === '2') {
+          ivaMultiplier = 0.12;
+        } else if (p.ivaRate === '4') {
+          ivaMultiplier = 0.15;
+        }
+
+        return (
+          <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+            <td className="px-5 py-3.5">
+              <span className="font-mono text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{p.code}</span>
+            </td>
+            <td className="px-5 py-3.5">
+              <p className="font-medium text-slate-800">{p.name}</p>
+              {p.description && <p className="text-xs text-slate-400 mt-0.5 truncate max-w-xs">{p.description}</p>}
+            </td>
+            <td className="px-5 py-3.5 font-semibold text-slate-800">${Number(p.unitPrice).toFixed(2)}</td>
+            <td className="px-5 py-3.5">
+              <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${p.ivaRate === '0' ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                {IVA_LABELS[p.ivaRate] ?? p.ivaRate}
+              </span>
+            </td>
+            <td className="px-5 py-3.5 text-slate-600 text-sm">
+              ${(Number(p.unitPrice) * (1 + ivaMultiplier)).toFixed(2)}
+            </td>
+          </tr>
+        );
+      })()
     ));
   }
 

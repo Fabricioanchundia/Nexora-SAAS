@@ -50,9 +50,14 @@ export default function DashboardPage() {
     try {
       const res = await api.get('/invoices?page=1&limit=100');
       const response = res.data?.data;
-      const invoices: Invoice[] = Array.isArray(response) ? response :
-                                   Array.isArray(response?.data) ? response.data :
-                                   Array.isArray(response?.invoices) ? response.invoices : [];
+      let invoices: Invoice[] = [];
+      if (Array.isArray(response)) {
+        invoices = response;
+      } else if (Array.isArray(response?.data)) {
+        invoices = response.data;
+      } else if (Array.isArray(response?.invoices)) {
+        invoices = response.invoices;
+      }
       setStats({
         totalInvoices: invoices.length,
         authorized: invoices.filter((i) => i.status === 'AUTHORIZED').length,
@@ -108,11 +113,13 @@ export default function DashboardPage() {
             Ver todas
           </button>
         </div>
-        {loading ? (
+        {loading && (
           <div className="p-6 text-center text-slate-400 text-sm">Cargando...</div>
-        ) : stats.recentInvoices.length === 0 ? (
+        )}
+        {!loading && stats.recentInvoices.length === 0 && (
           <div className="p-6 text-center text-slate-400 text-sm">No hay facturas aún</div>
-        ) : (
+        )}
+        {!loading && stats.recentInvoices.length > 0 && (
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">

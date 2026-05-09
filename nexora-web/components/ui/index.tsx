@@ -39,33 +39,16 @@ const BADGE_DOTS: Readonly<Record<string, string>> = {
 };
 
 const BADGE_LABELS: Readonly<Record<string, string>> = {
-  authorized:  'Autorizada',
-  active:      'Activo',
-  production:  'Producción',
-  pending:     'Pendiente',
-  processing:  'Procesando',
-  error:       'Error',
-  rejected:    'Rechazada',
-  rechazada:   'Rechazada',
-  inactive:    'Inactivo',
-  test:        'Pruebas',
-  ruc:         'RUC',
-  cedula:      'Cédula',
-  pasaporte:   'Pasaporte',
-  AUTHORIZED:  'Autorizada',
-  PENDING:     'Pendiente',
-  PROCESSING:  'Procesando',
-  ERROR:       'Error',
-  REJECTED:    'Rechazada',
-  RECHAZADA:   'Rechazada',
-  SENT:        'Enviada',
-  SIGNED:      'Firmada',
+  authorized: 'Autorizada', active: 'Activo', production: 'Producción',
+  pending: 'Pendiente', processing: 'Procesando', error: 'Error',
+  rejected: 'Rechazada', rechazada: 'Rechazada', inactive: 'Inactivo',
+  test: 'Pruebas', ruc: 'RUC', cedula: 'Cédula', pasaporte: 'Pasaporte',
+  AUTHORIZED: 'Autorizada', PENDING: 'Pendiente', PROCESSING: 'Procesando',
+  ERROR: 'Error', REJECTED: 'Rechazada', RECHAZADA: 'Rechazada',
+  SENT: 'Enviada', SIGNED: 'Firmada',
 };
 
-interface StatusBadgeProps {
-  readonly value: string;
-  readonly showDot?: boolean;
-}
+interface StatusBadgeProps { readonly value: string; readonly showDot?: boolean; }
 
 export function StatusBadge({ value, showDot = true }: StatusBadgeProps) {
   const key    = value?.toLowerCase() ?? '';
@@ -91,23 +74,15 @@ interface SearchInputProps {
 }
 
 export function SearchInput({ value, onChange, placeholder = 'Buscar...' }: SearchInputProps) {
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value), [onChange],
-  );
-  const handleClear = useCallback(() => onChange(''), [onChange]);
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value), [onChange]);
+  const handleClear  = useCallback(() => onChange(''), [onChange]);
   return (
     <div className="relative">
       <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
-      <input
-        type="text"
-        value={value}
-        onChange={handleChange}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        className="pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all placeholder:text-slate-400"
-      />
+      <input type="text" value={value} onChange={handleChange} placeholder={placeholder} aria-label={placeholder}
+        className="pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all placeholder:text-slate-400" />
       {value && (
         <button type="button" onClick={handleClear} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -133,9 +108,7 @@ interface FilterSelectProps {
 }
 
 export function FilterSelect({ value, onChange, options, placeholder = 'Todos' }: FilterSelectProps) {
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value), [onChange],
-  );
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value), [onChange]);
   return (
     <select value={value} onChange={handleChange} aria-label={placeholder}
       className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all text-slate-700 cursor-pointer">
@@ -146,7 +119,7 @@ export function FilterSelect({ value, onChange, options, placeholder = 'Todos' }
 }
 
 // ════════════════════════════════════════════════════════
-// SkeletonTable — S5479: no array index keys
+// SkeletonTable
 // ════════════════════════════════════════════════════════
 
 function SkeletonRow({ rowId, cols }: Readonly<{ rowId: string; cols: number }>) {
@@ -265,9 +238,7 @@ export function PageHeader({ title, description, action }: PageHeaderProps) {
 }
 
 // ════════════════════════════════════════════════════════
-// DataTable
-// S6551: typed row access, no 'as Record' cast
-// S3358: no nested ternary
+// DataTable — S6551, S3358 fixed
 // ════════════════════════════════════════════════════════
 
 export interface Column<T> {
@@ -282,17 +253,30 @@ function DataTableRow<T>({
 }: Readonly<{ row: T; columns: readonly Column<T>[]; onRowClick?: (row: T) => void }>) {
   const handleClick = useCallback(() => onRowClick?.(row), [row, onRowClick]);
   return (
-    <tr
-      onClick={onRowClick ? handleClick : undefined}
-      className={onRowClick ? 'transition-colors cursor-pointer hover:bg-slate-50' : 'transition-colors hover:bg-slate-50/50'}
-    >
+    <tr onClick={onRowClick ? handleClick : undefined}
+      className={onRowClick ? 'transition-colors cursor-pointer hover:bg-slate-50' : 'transition-colors hover:bg-slate-50/50'}>
       {columns.map(col => {
-        // S6551: explicit typed index — no 'as Record<string,unknown>' cast
-        const typedRow = row as { [key: string]: unknown };
+        // S6551: typed index without 'as Record' cast
+        const typedRow  = row as { [key: string]: unknown };
         const rawValue: unknown = typedRow[col.key];
-        // S6551: rawValue is unknown — convert safely without '?? "—"' which triggers Object.toString warning
-        const fallback = rawValue !== null && rawValue !== undefined ? String(rawValue) : '—';
-        const content  = col.render ? col.render(row) : fallback;
+        // S6551: safe string conversion — avoid Object.toString by only stringifying non-object, non-function primitives
+        const fallback = (() => {
+          if (rawValue == null) return '—';
+          if (typeof rawValue === 'function') return '—';
+          if (typeof rawValue === 'object') {
+            try {
+              return JSON.stringify(rawValue);
+            } catch {
+              return '—';
+            }
+          }
+          if (typeof rawValue === 'string') return rawValue;
+          if (typeof rawValue === 'number' || typeof rawValue === 'boolean' || typeof rawValue === 'bigint' || typeof rawValue === 'symbol') {
+            return String(rawValue);
+          }
+          return '—';
+        })();
+        const content   = col.render ? col.render(row) : fallback;
         return (
           <td key={col.key} className={`px-6 py-4 text-slate-700 ${col.className ?? ''}`}>
             {content}
@@ -352,8 +336,9 @@ export function DataTable<T>({ columns, data, loading, keyField, emptyState, onR
 }
 
 // ════════════════════════════════════════════════════════
-// ConfirmDialog — S6819: native <dialog>
-// S6847/S1082: no onClick on non-interactive div → use <button> for backdrop
+// ConfirmDialog
+// S6819: native <dialog> element
+// S6847/S1082: click detection via dialog bounds — no onClick on non-interactive wrapper div
 // ════════════════════════════════════════════════════════
 
 interface ConfirmDialogProps {
@@ -378,22 +363,15 @@ export function ConfirmDialog({
     else if (!open && el.open) el.close();
   }, [open]);
 
-  // S6819: <dialog> handles backdrop natively via ::backdrop pseudo-element
-  // S6847/S1082: no onClick on non-interactive element — use dialog's own click to detect backdrop
-  const handleDialogClick = useCallback((e: React.MouseEvent<HTMLDialogElement>) => {
-    const rect = ref.current?.getBoundingClientRect();
-    if (!rect) return;
-    const outside = e.clientX < rect.left || e.clientX > rect.right
-                 || e.clientY < rect.top  || e.clientY > rect.bottom;
-    if (outside) onCancel();
-  }, [onCancel]);
-
   if (!open) return null;
 
   return (
     <dialog
       ref={ref}
-      onClick={handleDialogClick}
+      onCancel={(e) => {
+        e.preventDefault();
+        onCancel();
+      }}
       aria-labelledby="cd-title"
       aria-describedby="cd-desc"
       className="rounded-2xl shadow-xl p-0 border-0 backdrop:bg-slate-900/40 backdrop:backdrop-blur-sm w-full max-w-sm"
