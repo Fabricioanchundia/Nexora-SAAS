@@ -6,7 +6,12 @@ export const metadata: Metadata = {
   description: 'Sistema de facturación electrónica para Ecuador',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// S6759: Readonly props
+interface RootLayoutProps {
+  readonly children: React.ReactNode;
+}
+
+export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="es">
       <body>{children}</body>
