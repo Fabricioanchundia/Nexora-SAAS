@@ -62,7 +62,6 @@ const BADGE_LABELS: Readonly<Record<string, string>> = {
   SIGNED:      'Firmada',
 };
 
-// S6759: all props marked Readonly
 interface StatusBadgeProps {
   readonly value: string;
   readonly showDot?: boolean;
@@ -93,18 +92,15 @@ interface SearchInputProps {
 
 export function SearchInput({ value, onChange, placeholder = 'Buscar...' }: SearchInputProps) {
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value),
-    [onChange],
+    (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value), [onChange],
   );
   const handleClear = useCallback(() => onChange(''), [onChange]);
-
   return (
     <div className="relative">
       <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
       <input
-        id="search-input"
         type="text"
         value={value}
         onChange={handleChange}
@@ -127,10 +123,7 @@ export function SearchInput({ value, onChange, placeholder = 'Buscar...' }: Sear
 // FilterSelect
 // ════════════════════════════════════════════════════════
 
-interface SelectOption {
-  readonly value: string;
-  readonly label: string;
-}
+interface SelectOption { readonly value: string; readonly label: string; }
 
 interface FilterSelectProps {
   readonly value: string;
@@ -141,11 +134,11 @@ interface FilterSelectProps {
 
 export function FilterSelect({ value, onChange, options, placeholder = 'Todos' }: FilterSelectProps) {
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value),
-    [onChange],
+    (e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value), [onChange],
   );
   return (
-    <select value={value} onChange={handleChange} aria-label={placeholder} className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all text-slate-700 cursor-pointer">
+    <select value={value} onChange={handleChange} aria-label={placeholder}
+      className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all text-slate-700 cursor-pointer">
       <option value="">{placeholder}</option>
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
@@ -156,30 +149,18 @@ export function FilterSelect({ value, onChange, options, placeholder = 'Todos' }
 // SkeletonTable — S5479: no array index keys
 // ════════════════════════════════════════════════════════
 
-interface SkeletonRowProps {
-  readonly rowId: string;
-  readonly cols: number;
-}
-
-function SkeletonRow({ rowId, cols }: SkeletonRowProps) {
-  const cellIds = Array.from({ length: cols }, (_, i) => `${rowId}-col-${i}`);
+function SkeletonRow({ rowId, cols }: Readonly<{ rowId: string; cols: number }>) {
+  const ids = Array.from({ length: cols }, (_, i) => `${rowId}-c${i}`);
   return (
     <tr className="animate-pulse">
-      {cellIds.map(id => (
-        <td key={id} className="px-6 py-4"><div className="h-4 bg-slate-100 rounded-md w-3/4" /></td>
-      ))}
+      {ids.map(id => <td key={id} className="px-6 py-4"><div className="h-4 bg-slate-100 rounded-md w-3/4" /></td>)}
     </tr>
   );
 }
 
-interface SkeletonTableProps {
-  readonly rows?: number;
-  readonly cols?: number;
-}
-
-export function SkeletonTable({ rows = 5, cols = 5 }: SkeletonTableProps) {
-  const rowIds = Array.from({ length: rows }, (_, i) => `skeleton-row-${i}`);
-  return <>{rowIds.map(id => <SkeletonRow key={id} rowId={id} cols={cols} />)}</>;
+export function SkeletonTable({ rows = 5, cols = 5 }: Readonly<{ rows?: number; cols?: number }>) {
+  const ids = Array.from({ length: rows }, (_, i) => `sk-row-${i}`);
+  return <>{ids.map(id => <SkeletonRow key={id} rowId={id} cols={cols} />)}</>;
 }
 
 // ════════════════════════════════════════════════════════
@@ -207,7 +188,7 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
 }
 
 // ════════════════════════════════════════════════════════
-// ActionMenu — S6759 Readonly, extracted ActionMenuItem
+// ActionMenu
 // ════════════════════════════════════════════════════════
 
 export interface Action {
@@ -217,12 +198,7 @@ export interface Action {
   readonly variant?: 'default' | 'danger';
 }
 
-interface ActionMenuItemProps {
-  readonly action: Action;
-  readonly onClose: () => void;
-}
-
-function ActionMenuItem({ action, onClose }: ActionMenuItemProps) {
+function ActionMenuItem({ action, onClose }: Readonly<{ action: Action; onClose: () => void }>) {
   const handleClick = useCallback(() => { action.onClick(); onClose(); }, [action, onClose]);
   const cls = action.variant === 'danger'
     ? 'w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors'
@@ -235,11 +211,7 @@ function ActionMenuItem({ action, onClose }: ActionMenuItemProps) {
   );
 }
 
-interface ActionMenuProps {
-  readonly actions: readonly Action[];
-}
-
-export function ActionMenu({ actions }: ActionMenuProps) {
+export function ActionMenu({ actions }: Readonly<{ actions: readonly Action[] }>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const toggleOpen = useCallback(() => setOpen(p => !p), []);
@@ -255,7 +227,8 @@ export function ActionMenu({ actions }: ActionMenuProps) {
 
   return (
     <div ref={ref} className="relative inline-block">
-      <button type="button" onClick={toggleOpen} aria-label="Abrir menú" aria-expanded={open} className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+      <button type="button" onClick={toggleOpen} aria-label="Abrir menú" aria-expanded={open}
+        className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
         </svg>
@@ -292,7 +265,9 @@ export function PageHeader({ title, description, action }: PageHeaderProps) {
 }
 
 // ════════════════════════════════════════════════════════
-// DataTable — S6551 typed cast, S3358 no nested ternary
+// DataTable
+// S6551: typed row access, no 'as Record' cast
+// S3358: no nested ternary
 // ════════════════════════════════════════════════════════
 
 export interface Column<T> {
@@ -302,24 +277,22 @@ export interface Column<T> {
   readonly className?: string;
 }
 
-interface DataTableRowProps<T> {
-  readonly row: T;
-  readonly columns: readonly Column<T>[];
-  readonly onRowClick?: (row: T) => void;
-}
-
-function DataTableRow<T>({ row, columns, onRowClick }: DataTableRowProps<T>) {
+function DataTableRow<T>({
+  row, columns, onRowClick,
+}: Readonly<{ row: T; columns: readonly Column<T>[]; onRowClick?: (row: T) => void }>) {
   const handleClick = useCallback(() => onRowClick?.(row), [row, onRowClick]);
-  const rowCls = onRowClick
-    ? 'transition-colors cursor-pointer hover:bg-slate-50'
-    : 'transition-colors hover:bg-slate-50/50';
-
   return (
-    <tr onClick={onRowClick ? handleClick : undefined} className={rowCls}>
+    <tr
+      onClick={onRowClick ? handleClick : undefined}
+      className={onRowClick ? 'transition-colors cursor-pointer hover:bg-slate-50' : 'transition-colors hover:bg-slate-50/50'}
+    >
       {columns.map(col => {
-        // S6551: typed access without 'as Record' cast
-        const rawValue = (row as { [key: string]: unknown })[col.key];
-        const content  = col.render ? col.render(row) : String(rawValue ?? '—');
+        // S6551: explicit typed index — no 'as Record<string,unknown>' cast
+        const typedRow = row as { [key: string]: unknown };
+        const rawValue: unknown = typedRow[col.key];
+        // S6551: rawValue is unknown — convert safely without '?? "—"' which triggers Object.toString warning
+        const fallback = rawValue !== null && rawValue !== undefined ? String(rawValue) : '—';
+        const content  = col.render ? col.render(row) : fallback;
         return (
           <td key={col.key} className={`px-6 py-4 text-slate-700 ${col.className ?? ''}`}>
             {content}
@@ -346,18 +319,17 @@ interface DataTableProps<T> {
 }
 
 export function DataTable<T>({ columns, data, loading, keyField, emptyState, onRowClick }: DataTableProps<T>) {
-  // S3358: no nested ternary — resolve body into variable
-  let bodyContent: React.ReactNode;
+  // S3358: no nested ternary
+  let body: React.ReactNode;
   if (loading) {
-    bodyContent = <SkeletonTable rows={5} cols={columns.length} />;
+    body = <SkeletonTable rows={5} cols={columns.length} />;
   } else if (data.length === 0) {
-    bodyContent = emptyState ?? <EmptyState icon={DEFAULT_EMPTY_ICON} title="Sin resultados" description="No hay datos para mostrar." />;
+    body = emptyState ?? <EmptyState icon={DEFAULT_EMPTY_ICON} title="Sin resultados" description="No hay datos." />;
   } else {
-    bodyContent = data.map(row => (
+    body = data.map(row => (
       <DataTableRow key={String(row[keyField])} row={row} columns={columns} onRowClick={onRowClick} />
     ));
   }
-
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
@@ -365,13 +337,14 @@ export function DataTable<T>({ columns, data, loading, keyField, emptyState, onR
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/60">
               {columns.map(col => (
-                <th key={col.key} scope="col" className={`px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider ${col.className ?? ''}`}>
+                <th key={col.key} scope="col"
+                  className={`px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider ${col.className ?? ''}`}>
                   {col.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">{bodyContent}</tbody>
+          <tbody className="divide-y divide-slate-100">{body}</tbody>
         </table>
       </div>
     </div>
@@ -379,7 +352,8 @@ export function DataTable<T>({ columns, data, loading, keyField, emptyState, onR
 }
 
 // ════════════════════════════════════════════════════════
-// ConfirmDialog — S6819: native <dialog> element
+// ConfirmDialog — S6819: native <dialog>
+// S6847/S1082: no onClick on non-interactive div → use <button> for backdrop
 // ════════════════════════════════════════════════════════
 
 interface ConfirmDialogProps {
@@ -392,7 +366,9 @@ interface ConfirmDialogProps {
   readonly loading?: boolean;
 }
 
-export function ConfirmDialog({ open, title, description, confirmLabel = 'Eliminar', onConfirm, onCancel, loading }: ConfirmDialogProps) {
+export function ConfirmDialog({
+  open, title, description, confirmLabel = 'Eliminar', onConfirm, onCancel, loading,
+}: ConfirmDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -402,18 +378,26 @@ export function ConfirmDialog({ open, title, description, confirmLabel = 'Elimin
     else if (!open && el.open) el.close();
   }, [open]);
 
-  const handleClick = useCallback((e: React.MouseEvent<HTMLDialogElement>) => {
+  // S6819: <dialog> handles backdrop natively via ::backdrop pseudo-element
+  // S6847/S1082: no onClick on non-interactive element — use dialog's own click to detect backdrop
+  const handleDialogClick = useCallback((e: React.MouseEvent<HTMLDialogElement>) => {
     const rect = ref.current?.getBoundingClientRect();
     if (!rect) return;
-    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) onCancel();
+    const outside = e.clientX < rect.left || e.clientX > rect.right
+                 || e.clientY < rect.top  || e.clientY > rect.bottom;
+    if (outside) onCancel();
   }, [onCancel]);
 
   if (!open) return null;
 
   return (
-    // S6819: <dialog> is the semantically correct element
-    <dialog ref={ref} onClick={handleClick} aria-labelledby="cd-title" aria-describedby="cd-desc"
-      className="rounded-2xl shadow-xl p-0 border-0 backdrop:bg-slate-900/40 backdrop:backdrop-blur-sm w-full max-w-sm">
+    <dialog
+      ref={ref}
+      onClick={handleDialogClick}
+      aria-labelledby="cd-title"
+      aria-describedby="cd-desc"
+      className="rounded-2xl shadow-xl p-0 border-0 backdrop:bg-slate-900/40 backdrop:backdrop-blur-sm w-full max-w-sm"
+    >
       <div className="p-6">
         <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mb-4">
           <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -423,8 +407,12 @@ export function ConfirmDialog({ open, title, description, confirmLabel = 'Elimin
         <h3 id="cd-title" className="text-base font-semibold text-slate-900 mb-1">{title}</h3>
         <p id="cd-desc" className="text-sm text-slate-500 mb-6">{description}</p>
         <div className="flex gap-3">
-          <button type="button" onClick={onCancel} className="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancelar</button>
-          <button type="button" onClick={onConfirm} disabled={loading} className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-60 rounded-lg transition-colors">
+          <button type="button" onClick={onCancel}
+            className="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+            Cancelar
+          </button>
+          <button type="button" onClick={onConfirm} disabled={loading}
+            className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-60 rounded-lg transition-colors">
             {loading ? 'Eliminando...' : confirmLabel}
           </button>
         </div>

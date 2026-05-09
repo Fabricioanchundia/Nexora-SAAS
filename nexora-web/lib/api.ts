@@ -6,8 +6,9 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  // S7741: compare with undefined directly (globalThis.window !== undefined)
   // S7764: globalThis instead of window
-  if (typeof globalThis.window !== 'undefined') {
+  if (globalThis.window !== undefined) {
     const token     = globalThis.localStorage.getItem('nexora_token');
     const companyId = globalThis.localStorage.getItem('nexora_company_id');
     if (token)     config.headers.Authorization  = `Bearer ${token}`;
@@ -20,8 +21,9 @@ api.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
     const axiosError = error as { response?: { status?: number } };
+    // S7741: compare with undefined directly
     // S7764: globalThis instead of window
-    if (axiosError.response?.status === 401 && typeof globalThis.window !== 'undefined') {
+    if (axiosError.response?.status === 401 && globalThis.window !== undefined) {
       globalThis.localStorage.removeItem('nexora_token');
       globalThis.localStorage.removeItem('nexora_company_id');
       globalThis.location.href = '/login';
