@@ -6,23 +6,27 @@ import api from '@/lib/api';
 
 type Mode = 'login' | 'register';
 
-function NexoraLogo({ size = 56 }: Readonly<{ size?: number }>) {
+function NexoraLogo({ size = 60 }: Readonly<{ size?: number }>) {
   return (
-    <svg width={size} height={size} viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Nexora Labs logo">
+    <svg width={size} height={size} viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Nexora Labs">
       <defs>
         <linearGradient id="ng1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#00B4FF" />
+          <stop offset="0%" stopColor="#00C8FF" />
           <stop offset="100%" stopColor="#1D4ED8" />
         </linearGradient>
-        <linearGradient id="ng2" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#7DD3FC" />
-          <stop offset="100%" stopColor="#60A5FA" />
+        <linearGradient id="ng2" x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#3B82F6" />
+          <stop offset="100%" stopColor="#7DD3FC" />
         </linearGradient>
       </defs>
-      <polygon points="28,164 28,36 66,36 134,122 134,36 172,36 172,164 134,164 66,78 66,164" fill="url(#ng1)" />
-      <polygon points="66,36 104,36 134,78 96,78" fill="url(#ng2)" opacity="0.65" />
-      <g transform="translate(154,40)">
-        <polygon points="0,-9 2.2,-2.2 9,0 2.2,2.2 0,9 -2.2,2.2 -9,0 -2.2,-2.2" fill="#BAE6FD" />
+      {/* N body left */}
+      <polygon points="28,168 28,32 68,32 68,100 132,32 172,32 172,168 132,168 132,100 68,168" fill="url(#ng1)" />
+      {/* Highlight diagonal */}
+      <polygon points="68,32 108,32 68,80" fill="url(#ng2)" opacity="0.5" />
+      <polygon points="132,168 92,168 132,120" fill="url(#ng2)" opacity="0.5" />
+      {/* Star sparkle top-right */}
+      <g transform="translate(158,36)">
+        <polygon points="0,-10 2.5,-2.5 10,0 2.5,2.5 0,10 -2.5,2.5 -10,0 -2.5,-2.5" fill="#BAE6FD" />
       </g>
     </svg>
   );
@@ -30,19 +34,14 @@ function NexoraLogo({ size = 56 }: Readonly<{ size?: number }>) {
 
 function Spinner() {
   return (
-    <div style={{
-      width: '15px', height: '15px', flexShrink: 0,
-      border: '2.5px solid rgba(255,255,255,0.3)',
-      borderTopColor: '#fff', borderRadius: '50%',
-      animation: 'nxspin 0.7s linear infinite',
-    }} />
+    <div style={{ width:'15px', height:'15px', flexShrink:0, border:'2.5px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', borderRadius:'50%', animation:'nxspin 0.7s linear infinite' }} />
   );
 }
 
 function ErrorBox({ message }: Readonly<{ message: string }>) {
   return (
-    <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#DC2626', fontSize: '13px', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0, marginTop: '1px' }} aria-hidden="true">
+    <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', fontSize:'13px', borderRadius:'10px', padding:'10px 14px', marginBottom:'16px', display:'flex', alignItems:'flex-start', gap:'8px' }}>
+      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink:0, marginTop:'1px' }} aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
       {message}
@@ -52,8 +51,8 @@ function ErrorBox({ message }: Readonly<{ message: string }>) {
 
 function SuccessBox({ message }: Readonly<{ message: string }>) {
   return (
-    <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', color: '#15803D', fontSize: '13px', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0, marginTop: '1px' }} aria-hidden="true">
+    <div style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#15803D', fontSize:'13px', borderRadius:'10px', padding:'10px 14px', marginBottom:'16px', display:'flex', alignItems:'flex-start', gap:'8px' }}>
+      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink:0, marginTop:'1px' }} aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
       </svg>
       {message}
@@ -86,11 +85,11 @@ export default function LoginPage() {
   };
 
   const inputBase: React.CSSProperties = {
-    width: '100%', boxSizing: 'border-box',
-    border: '1.5px solid #E2E8F0', borderRadius: '12px',
-    padding: '11px 14px', fontSize: '14px', color: '#0F172A',
-    background: '#F8FAFC', outline: 'none', transition: 'all 0.15s',
-    fontFamily: 'inherit',
+    width:'100%', boxSizing:'border-box',
+    border:'1.5px solid #E2E8F0', borderRadius:'12px',
+    padding:'11px 14px', fontSize:'14px', color:'#0F172A',
+    background:'#F8FAFC', outline:'none', transition:'all 0.15s',
+    fontFamily:'inherit',
   };
   const iFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     e.target.style.borderColor = '#3B82F6';
@@ -104,36 +103,66 @@ export default function LoginPage() {
   };
 
   const btnStyle: React.CSSProperties = {
-    width: '100%', padding: '13px',
-    background: 'linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)',
-    color: '#fff', border: 'none', borderRadius: '12px',
-    fontSize: '14px', fontWeight: 700, cursor: 'pointer',
-    boxShadow: '0 4px 16px rgba(29,78,216,0.35)',
-    transition: 'all 0.2s', fontFamily: 'inherit',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+    width:'100%', padding:'13px',
+    background:'linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)',
+    color:'#fff', border:'none', borderRadius:'12px',
+    fontSize:'14px', fontWeight:700, cursor:'pointer',
+    boxShadow:'0 4px 16px rgba(29,78,216,0.35)',
+    transition:'all 0.2s', fontFamily:'inherit',
+    display:'flex', alignItems:'center', justifyContent:'center', gap:'8px',
   };
+
   const labelStyle: React.CSSProperties = {
-    display: 'block', fontSize: '13px', fontWeight: 600,
-    color: '#374151', marginBottom: '6px',
+    display:'block', fontSize:'13px', fontWeight:600,
+    color:'#374151', marginBottom:'6px',
   };
-  const fieldStyle: React.CSSProperties = { marginBottom: '15px' };
+  const fieldStyle: React.CSSProperties = { marginBottom:'15px' };
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail || !loginPassword) { setLoginError('Ingresa tu correo y contraseña'); return; }
-    setLoginLoading(true); setLoginError('');
+    setLoginLoading(true);
+    setLoginError('');
     try {
-      const res = await api.post('/auth/login', { email: loginEmail, password: loginPassword });
-      const { token, user, company } = res.data.data ?? res.data;
+      const res  = await api.post('/auth/login', { email: loginEmail, password: loginPassword });
+      const body = res.data.data ?? res.data;
+
+      // ── Extraer token ─────────────────────────────────────────────
+      const token = body.token ?? body.access_token ?? body.accessToken ?? '';
+
+      // ── Extraer nombre del usuario ────────────────────────────────
+      const user     = body.user ?? body;
+      const userName = user.name ?? user.fullName ?? user.email ?? loginEmail;
+
+      // ── Extraer company_id — soporta múltiples estructuras ────────
+      // Estructura 1: { token, user, company }
+      // Estructura 2: { token, user: { company } }
+      // Estructura 3: { token, user: { companies: [...] } }
+      // Estructura 4: { token, user: { companyId } }
+      const company   = body.company ?? user.company ?? user.companies?.[0] ?? null;
+      const companyId = company?.id ?? user.companyId ?? body.companyId ?? '';
+
+      if (!token) {
+        setLoginError('Error: no se recibió el token de autenticación.');
+        return;
+      }
+
       globalThis.localStorage.setItem('nexora_token',      token);
-      globalThis.localStorage.setItem('nexora_user_name',  user?.name ?? user?.email ?? '');
-      globalThis.localStorage.setItem('nexora_company_id', company?.id ?? '');
+      globalThis.localStorage.setItem('nexora_user_name',  userName);
+      globalThis.localStorage.setItem('nexora_company_id', companyId);
+
+      // Debug temporal — ver qué devuelve el backend
+      console.log('[Login] body:', JSON.stringify(body, null, 2));
+      console.log('[Login] companyId guardado:', companyId);
+
       router.push('/dashboard');
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { message?: string | string[] } } };
       const m  = ax.response?.data?.message;
       setLoginError(Array.isArray(m) ? m[0] : m ?? 'Error al iniciar sesión. Intente nuevamente.');
-    } finally { setLoginLoading(false); }
+    } finally {
+      setLoginLoading(false);
+    }
   }, [loginEmail, loginPassword, router]);
 
   const handleRegister = useCallback(async (e: React.FormEvent) => {
@@ -163,30 +192,30 @@ export default function LoginPage() {
         @keyframes nxspin   { to { transform: rotate(360deg); } }
         @keyframes nxfadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
         .nx-card { animation: nxfadeIn 0.35s ease; }
-        .nx-submit:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(29,78,216,0.42) !important; }
-        .nx-submit:active:not(:disabled) { transform: translateY(0); }
-        .nx-submit:disabled { opacity: 0.65; cursor: not-allowed; }
+        .nx-submit:hover:not(:disabled) { filter:brightness(1.08); transform:translateY(-1px); box-shadow:0 8px 24px rgba(29,78,216,0.42) !important; }
+        .nx-submit:active:not(:disabled) { transform:translateY(0); }
+        .nx-submit:disabled { opacity:0.65; cursor:not-allowed; }
       `}</style>
 
       <div style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(150deg, #EEF2FF 0%, #DBEAFE 60%, #E0F2FE 100%)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '24px', fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
-        position: 'relative', overflow: 'hidden',
+        minHeight:'100vh',
+        background:'linear-gradient(150deg, #EEF2FF 0%, #DBEAFE 60%, #E0F2FE 100%)',
+        display:'flex', alignItems:'center', justifyContent:'center',
+        padding:'24px', fontFamily:'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+        position:'relative', overflow:'hidden',
       }}>
-        {/* Decorative blobs */}
-        <div style={{ position:'fixed', top:'-120px', right:'-120px', width:'500px', height:'500px', borderRadius:'50%', background:'radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 65%)', pointerEvents:'none' }} />
+        {/* Blobs decorativos */}
+        <div style={{ position:'fixed', top:'-120px', right:'-120px', width:'500px', height:'500px', borderRadius:'50%', background:'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 65%)', pointerEvents:'none' }} />
         <div style={{ position:'fixed', bottom:'-100px', left:'-100px', width:'400px', height:'400px', borderRadius:'50%', background:'radial-gradient(circle, rgba(14,165,233,0.06) 0%, transparent 65%)', pointerEvents:'none' }} />
 
         <div className="nx-card" style={{
-          width: '100%', maxWidth: '420px',
-          background: 'rgba(255,255,255,0.93)',
-          backdropFilter: 'blur(24px)',
-          borderRadius: '24px',
-          padding: '40px 40px 32px',
-          boxShadow: '0 8px 48px rgba(0,0,0,0.10), 0 1px 0 rgba(255,255,255,0.9) inset',
-          border: '1px solid rgba(255,255,255,0.75)',
+          width:'100%', maxWidth:'420px',
+          background:'rgba(255,255,255,0.94)',
+          backdropFilter:'blur(24px)',
+          borderRadius:'24px',
+          padding:'40px 40px 32px',
+          boxShadow:'0 8px 48px rgba(0,0,0,0.10), 0 1px 0 rgba(255,255,255,0.9) inset',
+          border:'1px solid rgba(255,255,255,0.75)',
         }}>
 
           {/* Brand */}
@@ -221,7 +250,7 @@ export default function LoginPage() {
                 <label htmlFor={ids.le} style={labelStyle}>Correo electrónico</label>
                 <input id={ids.le} type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="correo@empresa.com" autoComplete="email" style={inputBase} onFocus={iFocus} onBlur={iBlur} />
               </div>
-              <div style={{ ...fieldStyle, marginBottom: '22px' }}>
+              <div style={{ ...fieldStyle, marginBottom:'22px' }}>
                 <label htmlFor={ids.lp} style={labelStyle}>Contraseña</label>
                 <input id={ids.lp} type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" style={inputBase} onFocus={iFocus} onBlur={iBlur} />
               </div>
@@ -232,7 +261,7 @@ export default function LoginPage() {
             </form>
           )}
 
-          {/* ── REGISTER ── */}
+          {/* ── REGISTRO ── */}
           {mode === 'register' && (
             <form onSubmit={handleRegister} noValidate>
               <div style={fieldStyle}>
@@ -247,7 +276,7 @@ export default function LoginPage() {
                 <label htmlFor={ids.rp} style={labelStyle}>Contraseña</label>
                 <input id={ids.rp} type="password" value={regPassword} onChange={e => setRegPassword(e.target.value)} placeholder="Mínimo 8 caracteres" autoComplete="new-password" style={inputBase} onFocus={iFocus} onBlur={iBlur} />
               </div>
-              <div style={{ ...fieldStyle, marginBottom: '20px' }}>
+              <div style={{ ...fieldStyle, marginBottom:'20px' }}>
                 <label htmlFor={ids.rc} style={labelStyle}>Confirmar contraseña</label>
                 <input id={ids.rc} type="password" value={regConfirm} onChange={e => setRegConfirm(e.target.value)} placeholder="Repite tu contraseña" autoComplete="new-password" style={inputBase} onFocus={iFocus} onBlur={iBlur} />
               </div>

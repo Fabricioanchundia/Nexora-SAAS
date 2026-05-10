@@ -7,6 +7,30 @@ interface DashboardLayoutProps {
   readonly children: React.ReactNode;
 }
 
+// ── Nexora Labs Logo ─────────────────────────────────────────────────────────
+function NexoraLogoMark() {
+  return (
+    <svg width="34" height="34" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="sl1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#00C8FF" />
+          <stop offset="100%" stopColor="#1D4ED8" />
+        </linearGradient>
+        <linearGradient id="sl2" x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#3B82F6" />
+          <stop offset="100%" stopColor="#7DD3FC" />
+        </linearGradient>
+      </defs>
+      <polygon points="28,168 28,32 68,32 68,100 132,32 172,32 172,168 132,168 132,100 68,168" fill="url(#sl1)" />
+      <polygon points="68,32 108,32 68,80" fill="url(#sl2)" opacity="0.55" />
+      <polygon points="132,168 92,168 132,120" fill="url(#sl2)" opacity="0.55" />
+      <g transform="translate(158,36)">
+        <polygon points="0,-8 2,-2 8,0 2,2 0,8 -2,2 -8,0 -2,-2" fill="#BAE6FD" />
+      </g>
+    </svg>
+  );
+}
+
 const NAV_ITEMS = [
   {
     label: 'Dashboard',
@@ -62,9 +86,18 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+  // ── Planes de suscripción ─────────────────────────────────────────────────
+  {
+    label: 'Planes',
+    href: '/dashboard/plans',
+    icon: (
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    ),
+  },
 ] as const;
 
-// Extracted NavItem — avoids inline onClick factory in .map()
 interface NavItemProps {
   readonly label: string;
   readonly href: string;
@@ -92,9 +125,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   useEffect(() => {
     setMounted(true);
-    // S7764: globalThis instead of window/localStorage
     const token = globalThis.localStorage.getItem('nexora_token');
-    // S7735: positive condition first
     if (token) {
       const name = globalThis.localStorage.getItem('nexora_user_name');
       if (name) setUserName(name);
@@ -112,7 +143,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     router.push('/login');
   }, [router]);
 
-  // User avatar initials
   const initials = userName
     .split(' ')
     .slice(0, 2)
@@ -125,291 +155,49 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   return (
     <>
       <style>{`
-        /* ── Nexora Labs Design System ── */
         :root {
-          --sidebar-bg:      #0B1628;
-          --sidebar-border:  rgba(255,255,255,0.06);
-          --sidebar-width:   240px;
-          --blue-primary:    #2563EB;
-          --blue-glow:       #3B82F6;
-          --blue-soft:       rgba(59,130,246,0.12);
-          --text-primary:    rgba(255,255,255,0.90);
-          --text-secondary:  rgba(255,255,255,0.45);
-          --text-muted:      rgba(255,255,255,0.22);
+          --sb-bg:     #0B1628;
+          --sb-border: rgba(255,255,255,0.06);
+          --sb-width:  240px;
+          --blue-soft: rgba(59,130,246,0.12);
+          --tx-pri:    rgba(255,255,255,0.90);
+          --tx-sec:    rgba(255,255,255,0.45);
+          --tx-mut:    rgba(255,255,255,0.22);
         }
-
-        .nx-layout {
-          display: flex;
-          min-height: 100vh;
-          background: #F1F5F9;
-          font-family: var(--font-sans, system-ui, sans-serif);
-        }
-
-        /* ── Sidebar ── */
-        .nx-sidebar {
-          width: var(--sidebar-width);
-          background: var(--sidebar-bg);
-          border-right: 1px solid var(--sidebar-border);
-          display: flex;
-          flex-direction: column;
-          position: fixed;
-          top: 0; left: 0; bottom: 0;
-          z-index: 40;
-        }
-
-        /* Brand */
-        .nx-brand {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 20px 18px 18px;
-          border-bottom: 1px solid var(--sidebar-border);
-        }
-
-        .nx-logo {
-          width: 34px;
-          height: 34px;
-          background: linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%);
-          border-radius: 9px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 15px;
-          font-weight: 800;
-          color: #fff;
-          letter-spacing: -0.5px;
-          flex-shrink: 0;
-          box-shadow: 0 0 12px rgba(59,130,246,0.35);
-        }
-
-        .nx-brand-name {
-          font-size: 14px;
-          font-weight: 700;
-          letter-spacing: 0.08em;
-          color: #fff;
-          line-height: 1;
-          display: block;
-        }
-
-        .nx-brand-sub {
-          font-size: 10px;
-          color: var(--text-muted);
-          display: block;
-          margin-top: 3px;
-          letter-spacing: 0.02em;
-        }
-
-        /* Nav */
-        .nx-nav {
-          flex: 1;
-          padding: 16px 10px;
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          overflow-y: auto;
-        }
-
-        .nx-nav-label {
-          font-size: 9.5px;
-          font-weight: 600;
-          letter-spacing: 0.1em;
-          color: var(--text-muted);
-          padding: 0 10px;
-          margin: 0 0 8px;
-          text-transform: uppercase;
-        }
-
-        .nav-item {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          width: 100%;
-          padding: 9px 10px;
-          border-radius: 8px;
-          font-size: 13.5px;
-          font-weight: 400;
-          color: var(--text-secondary);
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          text-align: left;
-          transition: all 0.15s ease;
-          position: relative;
-        }
-
-        .nav-item:hover {
-          background: rgba(255,255,255,0.05);
-          color: var(--text-primary);
-        }
-
-        .nav-item.active {
-          background: var(--blue-soft);
-          color: #60A5FA;
-          font-weight: 500;
-        }
-
-        .nav-icon {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 18px;
-          flex-shrink: 0;
-          opacity: 0.7;
-        }
-
-        .nav-item.active .nav-icon { opacity: 1; }
-
-        .nav-dot {
-          width: 5px;
-          height: 5px;
-          border-radius: 50%;
-          background: #3B82F6;
-          margin-left: auto;
-          flex-shrink: 0;
-        }
-
-        /* Divider */
-        .nx-divider {
-          height: 1px;
-          background: var(--sidebar-border);
-          margin: 4px 10px;
-        }
-
-        /* User section */
-        .nx-user {
-          padding: 12px 10px 16px;
-          border-top: 1px solid var(--sidebar-border);
-        }
-
-        .nx-user-card {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          padding: 8px 10px;
-          border-radius: 8px;
-          margin-bottom: 4px;
-        }
-
-        .nx-avatar {
-          width: 30px;
-          height: 30px;
-          border-radius: 8px;
-          background: linear-gradient(135deg, #1D4ED8, #3B82F6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 11px;
-          font-weight: 700;
-          color: #fff;
-          flex-shrink: 0;
-        }
-
-        .nx-user-name {
-          font-size: 12.5px;
-          font-weight: 500;
-          color: var(--text-primary);
-          margin: 0;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 140px;
-        }
-
-        .nx-user-role {
-          font-size: 10.5px;
-          color: var(--text-muted);
-          margin: 0;
-        }
-
-        .nx-logout {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          width: 100%;
-          padding: 8px 10px;
-          border-radius: 8px;
-          font-size: 12.5px;
-          font-weight: 400;
-          color: rgba(248,113,113,0.7);
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          text-align: left;
-          transition: all 0.15s;
-        }
-
-        .nx-logout:hover {
-          background: rgba(239,68,68,0.08);
-          color: #F87171;
-        }
-
-        /* Main */
-        .nx-main {
-          margin-left: var(--sidebar-width);
-          flex: 1;
-          min-height: 100vh;
-          overflow: auto;
-        }
-
-        /* Top bar */
-        .nx-topbar {
-          position: sticky;
-          top: 0;
-          z-index: 30;
-          background: rgba(241,245,249,0.85);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          border-bottom: 1px solid #E2E8F0;
-          padding: 0 32px;
-          height: 52px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .nx-breadcrumb {
-          font-size: 13px;
-          color: #64748B;
-        }
-
-        .nx-topbar-right {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .nx-topbar-badge {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          font-size: 11px;
-          font-weight: 500;
-          color: #2563EB;
-          background: #EFF6FF;
-          border: 1px solid #BFDBFE;
-          border-radius: 20px;
-          padding: 3px 10px;
-        }
-
-        .nx-page {
-          padding: 28px 32px;
-          max-width: 1200px;
-        }
+        .nx-layout { display:flex; min-height:100vh; background:#F1F5F9; font-family:var(--font-sans,system-ui,sans-serif); }
+        .nx-sidebar { width:var(--sb-width); background:var(--sb-bg); border-right:1px solid var(--sb-border); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:40; }
+        .nx-brand { display:flex; align-items:center; gap:10px; padding:18px 16px 16px; border-bottom:1px solid var(--sb-border); }
+        .nx-brand-name { font-size:13.5px; font-weight:700; letter-spacing:0.08em; color:#fff; line-height:1; display:block; }
+        .nx-brand-sub  { font-size:10px; color:var(--tx-mut); display:block; margin-top:3px; letter-spacing:0.04em; }
+        .nx-nav { flex:1; padding:14px 10px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; }
+        .nx-nav-label { font-size:9.5px; font-weight:600; letter-spacing:0.1em; color:var(--tx-mut); padding:0 10px; margin:0 0 8px; text-transform:uppercase; }
+        .nav-item { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; font-size:13.5px; font-weight:400; color:var(--tx-sec); background:transparent; border:none; cursor:pointer; text-align:left; transition:all 0.15s ease; }
+        .nav-item:hover { background:rgba(255,255,255,0.05); color:var(--tx-pri); }
+        .nav-item.active { background:var(--blue-soft); color:#60A5FA; font-weight:500; }
+        .nav-icon { display:flex; align-items:center; justify-content:center; width:18px; flex-shrink:0; opacity:0.7; }
+        .nav-item.active .nav-icon { opacity:1; }
+        .nav-dot { width:5px; height:5px; border-radius:50%; background:#3B82F6; margin-left:auto; flex-shrink:0; }
+        .nx-user { padding:10px 10px 14px; border-top:1px solid var(--sb-border); }
+        .nx-user-card { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:8px; margin-bottom:4px; }
+        .nx-avatar { width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,#1D4ED8,#3B82F6); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:#fff; flex-shrink:0; }
+        .nx-user-name { font-size:12.5px; font-weight:500; color:var(--tx-pri); margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px; }
+        .nx-user-role { font-size:10.5px; color:var(--tx-mut); margin:0; }
+        .nx-logout { display:flex; align-items:center; gap:8px; width:100%; padding:8px 10px; border-radius:8px; font-size:12.5px; font-weight:400; color:rgba(248,113,113,0.7); background:transparent; border:none; cursor:pointer; text-align:left; transition:all 0.15s; }
+        .nx-logout:hover { background:rgba(239,68,68,0.08); color:#F87171; }
+        .nx-main { margin-left:var(--sb-width); flex:1; min-height:100vh; overflow:auto; }
       `}</style>
 
       <div className="nx-layout">
-        {/* ── Sidebar ── */}
         <aside className="nx-sidebar">
-          {/* Brand */}
+          {/* Brand con logo SVG */}
           <div className="nx-brand">
-            <div className="nx-logo">N</div>
+            <NexoraLogoMark />
             <div>
               <span className="nx-brand-name">NEXORA</span>
               <span className="nx-brand-sub">Facturación Electrónica</span>
             </div>
           </div>
 
-          {/* Nav */}
           <nav className="nx-nav" aria-label="Navegación principal">
             <p className="nx-nav-label">Menú</p>
             {NAV_ITEMS.map((item) => {
@@ -428,12 +216,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             })}
           </nav>
 
-          {/* User */}
           <div className="nx-user">
             {userName && (
               <div className="nx-user-card">
                 <div className="nx-avatar">{initials}</div>
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth:0 }}>
                   <p className="nx-user-name">{userName}</p>
                   <p className="nx-user-role">Administrador</p>
                 </div>
@@ -448,7 +235,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         </aside>
 
-        {/* ── Main ── */}
         <main className="nx-main">
           {children}
         </main>
