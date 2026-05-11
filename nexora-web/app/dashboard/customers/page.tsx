@@ -19,7 +19,7 @@ const schema = z.object({
   identificationType: z.enum(['04', '05', '06', '07', '08']),
   identification: z.string().min(1, 'Requerido'),
   fullName:       z.string().min(2, 'Requerido'),
-  email:          z.email('Email inválido').optional().or(z.literal('')),
+  email:          z.string().email('Email inválido').optional().or(z.literal('')),
   phone:          z.string().optional(),
   address:        z.string().optional(),
 });
@@ -27,24 +27,38 @@ const schema = z.object({
 type CustomerForm = z.infer<typeof schema>;
 
 const ID_TYPE_LABELS: Readonly<Record<string, string>> = {
-  '04': 'Cédula',
-  '05': 'Pasaporte',
-  '06': 'RUC',
-  '07': 'Consumidor Final',
-  '08': 'Id. exterior',
+  '04': 'Cédula', '05': 'Pasaporte', '06': 'RUC',
+  '07': 'Consumidor Final', '08': 'Id. exterior',
 };
 
-// S6853: LabelledInput ensures label is always associated via htmlFor
-interface LabelledInputProps {
-  readonly id: string;
-  readonly label: string;
-  readonly error?: string;
-  readonly [key: string]: unknown;
-}
+// ── Estilos inline garantizados — funcionan sin Tailwind compilado ────────────
+const FIELD_STYLE: React.CSSProperties = { marginBottom: '14px' };
+
+const LABEL_STYLE: React.CSSProperties = {
+  display: 'block', fontSize: '13px', fontWeight: 600,
+  color: '#374151', marginBottom: '6px',
+};
+
+const INPUT_STYLE: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box',
+  border: '1.5px solid #E2E8F0', borderRadius: '10px',
+  padding: '10px 14px', fontSize: '14px',
+  color: '#0F172A',               // ← texto siempre visible
+  background: '#F8FAFC',
+  outline: 'none', fontFamily: 'inherit',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+};
+
+const SELECT_STYLE: React.CSSProperties = {
+  ...INPUT_STYLE,
+  cursor: 'pointer',
+  appearance: 'auto',             // ← muestra la flecha nativa del browser
+  WebkitAppearance: 'auto',
+};
 
 function FieldError({ message }: Readonly<{ message?: string }>) {
   if (!message) return null;
-  return <p className="text-red-500 text-xs mt-1">{message}</p>;
+  return <p style={{ color:'#EF4444', fontSize:'12px', marginTop:'4px' }}>{message}</p>;
 }
 
 export default function CustomersPage() {
@@ -60,13 +74,22 @@ export default function CustomersPage() {
     defaultValues: { identificationType: '04' },
   });
 
+  const ids = {
+    idType:  `${baseId}-id-type`,
+    idNum:   `${baseId}-id-num`,
+    name:    `${baseId}-name`,
+    email:   `${baseId}-email`,
+    phone:   `${baseId}-phone`,
+    address: `${baseId}-address`,
+  };
+
   const loadCustomers = useCallback(() => {
     api.get('/customers')
-      .then((res) => {
+      .then(res => {
         const data = res.data.data as Customer[] | { customers: Customer[] };
         setCustomers(Array.isArray(data) ? data : data.customers ?? []);
       })
-      .catch((err: unknown) => console.error('[CustomersPage] load failed:', err))
+      .catch((err: unknown) => console.error('[CustomersPage]', err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -93,118 +116,139 @@ export default function CustomersPage() {
       setShowForm(false);
       loadCustomers();
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { message?: string | string[] } } };
-      const msg = axiosErr.response?.data?.message;
-      setError(Array.isArray(msg) ? msg[0] : msg ?? 'Error al guardar cliente');
-    } finally {
-      setSaving(false);
-    }
+      const ax = err as { response?: { data?: { message?: string | string[] } } };
+      const m  = ax.response?.data?.message;
+      setError(Array.isArray(m) ? m[0] : m ?? 'Error al guardar cliente');
+    } finally { setSaving(false); }
   }, [reset, loadCustomers]);
 
-  // S3358: resolve table body content without nested ternary
+  // ── Table body ────────────────────────────────────────────────────────────
   let tableBody: React.ReactNode;
   if (loading) {
-    tableBody = <tr><td colSpan={5} className="p-8 text-center text-slate-400 text-sm">Cargando clientes...</td></tr>;
+    tableBody = <tr><td colSpan={5} style={{ padding:'40px', textAlign:'center', color:'#94A3B8', fontSize:'13px' }}>Cargando clientes...</td></tr>;
   } else if (customers.length === 0) {
     tableBody = (
-      <tr><td colSpan={5}>
-        <div className="flex flex-col items-center py-12 text-center">
-          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center mb-3 text-slate-400">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+      <tr><td colSpan={5} style={{ padding:'48px 20px', textAlign:'center' }}>
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'8px' }}>
+          <div style={{ width:'44px', height:'44px', background:'#F1F5F9', borderRadius:'12px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#94A3B8" strokeWidth={1.5} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-          <p className="text-sm font-medium text-slate-600 mb-1">Sin clientes</p>
-          <p className="text-xs text-slate-400">Agrega tu primer cliente para comenzar a facturar.</p>
+          <p style={{ color:'#475569', fontWeight:600, fontSize:'14px', margin:0 }}>Sin clientes</p>
+          <p style={{ color:'#94A3B8', fontSize:'12.5px', margin:0 }}>Agrega tu primer cliente para comenzar a facturar</p>
         </div>
       </td></tr>
     );
   } else {
-    tableBody = customers.map(c => (
-      <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-        <td className="px-5 py-3.5">
-          <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 border border-violet-200">
-            {ID_TYPE_LABELS[c.identificationType] ?? c.identificationType}
-          </span>
-        </td>
-        <td className="px-5 py-3.5 font-mono text-sm text-slate-700">{c.identification}</td>
-        <td className="px-5 py-3.5 font-medium text-slate-800">{c.fullName}</td>
-        <td className="px-5 py-3.5 text-slate-500 text-sm">{c.email ?? '—'}</td>
-        <td className="px-5 py-3.5 text-slate-500 text-sm">{c.phone ?? '—'}</td>
-      </tr>
-    ));
+    const TYPE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+      '04': { bg:'#F5F3FF', text:'#7C3AED', border:'#DDD6FE' },
+      '05': { bg:'#FFF7ED', text:'#C2410C', border:'#FED7AA' },
+      '06': { bg:'#EFF6FF', text:'#1D4ED8', border:'#BFDBFE' },
+      '07': { bg:'#F0FDF4', text:'#15803D', border:'#BBF7D0' },
+      '08': { bg:'#FFF1F2', text:'#BE123C', border:'#FECDD3' },
+    };
+    tableBody = customers.map(c => {
+      const tc = TYPE_COLORS[c.identificationType] ?? { bg:'#F8FAFC', text:'#475569', border:'#E2E8F0' };
+      return (
+        <tr key={c.id} style={{ borderBottom:'1px solid #F8FAFC', transition:'background 0.1s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background='#F8FAFC'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background='transparent'; }}>
+          <td style={{ padding:'12px 16px' }}>
+            <span style={{ display:'inline-flex', alignItems:'center', background:tc.bg, color:tc.text, border:`1px solid ${tc.border}`, borderRadius:'20px', fontSize:'11.5px', fontWeight:600, padding:'3px 10px' }}>
+              {ID_TYPE_LABELS[c.identificationType] ?? c.identificationType}
+            </span>
+          </td>
+          <td style={{ padding:'12px 16px', fontFamily:'monospace', fontSize:'13px', color:'#475569' }}>{c.identification}</td>
+          <td style={{ padding:'12px 16px', fontSize:'13.5px', fontWeight:600, color:'#0F172A' }}>{c.fullName}</td>
+          <td style={{ padding:'12px 16px', fontSize:'13px', color:'#64748B' }}>{c.email ?? '—'}</td>
+          <td style={{ padding:'12px 16px', fontSize:'13px', color:'#64748B' }}>{c.phone ?? '—'}</td>
+        </tr>
+      );
+    });
   }
 
-  // Field IDs for S6853
-  const ids = {
-    idType:  `${baseId}-id-type`,
-    idNum:   `${baseId}-id-num`,
-    name:    `${baseId}-name`,
-    email:   `${baseId}-email`,
-    phone:   `${baseId}-phone`,
-    address: `${baseId}-address`,
-  };
-
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div style={{ padding:'32px 36px', background:'#F1F5F9', minHeight:'100vh', fontFamily:'system-ui,-apple-system,sans-serif' }}>
+
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'24px' }}>
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Clientes</h1>
-          <p className="mt-1 text-sm text-slate-500">Gestiona tu cartera de clientes</p>
+          <h1 style={{ fontSize:'24px', fontWeight:800, color:'#0F172A', margin:'0 0 4px', letterSpacing:'-0.01em' }}>Clientes</h1>
+          <p style={{ fontSize:'13px', color:'#64748B', margin:0 }}>Gestiona tu cartera de clientes</p>
         </div>
         <button type="button" onClick={handleToggleForm}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-blue-600/20">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={showForm ? 'M6 18L18 6M6 6l12 12' : 'M12 4v16m8-8H4'} />
+          style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background: showForm ? '#F1F5F9' : 'linear-gradient(135deg,#1D4ED8,#3B82F6)', color: showForm ? '#374151' : '#fff', border: showForm ? '1px solid #E2E8F0' : 'none', borderRadius:'12px', fontSize:'14px', fontWeight:700, cursor:'pointer', fontFamily:'inherit', boxShadow: showForm ? 'none' : '0 4px 14px rgba(29,78,216,0.3)', transition:'all 0.15s' }}>
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d={showForm ? 'M6 18L18 6M6 6l12 12' : 'M12 4v16m8-8H4'} />
           </svg>
-          {showForm ? 'Cancelar' : 'Nuevo cliente'}
+          {showForm ? 'Cancelar' : '+ Nuevo cliente'}
         </button>
       </div>
 
       {/* Form */}
       {showForm && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
-          <h2 className="text-base font-semibold text-slate-900 mb-4">Nuevo cliente</h2>
-          {/* S6853: all inputs have matching htmlFor/id */}
-          <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-2 gap-4" noValidate>
-            <div>
-              <label htmlFor={ids.idType} className="block text-sm font-medium text-slate-700 mb-1">Tipo identificación</label>
-              <select id={ids.idType} {...register('identificationType')} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="04">Cédula</option>
-                <option value="05">Pasaporte</option>
-                <option value="06">RUC</option>
-                <option value="07">Consumidor Final</option>
-                <option value="08">Id. exterior</option>
-              </select>
+        <div style={{ background:'#fff', borderRadius:'18px', border:'1px solid #E2E8F0', padding:'24px', marginBottom:'20px', boxShadow:'0 2px 8px rgba(0,0,0,0.04)' }}>
+          <h2 style={{ fontSize:'16px', fontWeight:700, color:'#0F172A', margin:'0 0 20px' }}>Nuevo cliente</h2>
+          <form onSubmit={handleSubmit(onSubmit)} noValidate>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'14px' }}>
+
+              <div style={FIELD_STYLE}>
+                <label htmlFor={ids.idType} style={LABEL_STYLE}>Tipo identificación</label>
+                <select id={ids.idType} {...register('identificationType')} style={SELECT_STYLE}>
+                  <option value="04">Cédula</option>
+                  <option value="05">Pasaporte</option>
+                  <option value="06">RUC</option>
+                  <option value="07">Consumidor Final</option>
+                  <option value="08">Id. exterior</option>
+                </select>
+              </div>
+
+              <div style={FIELD_STYLE}>
+                <label htmlFor={ids.idNum} style={LABEL_STYLE}>Identificación</label>
+                <input id={ids.idNum} {...register('identification')} placeholder="Ej: 1350135958" style={INPUT_STYLE} />
+                <FieldError message={errors.identification?.message} />
+              </div>
+
+              <div style={{ ...FIELD_STYLE, gridColumn:'1 / -1' }}>
+                <label htmlFor={ids.name} style={LABEL_STYLE}>Nombre completo / Razón social</label>
+                <input id={ids.name} {...register('fullName')} placeholder="Ej: Juan Pérez" style={INPUT_STYLE} />
+                <FieldError message={errors.fullName?.message} />
+              </div>
+
+              <div style={FIELD_STYLE}>
+                <label htmlFor={ids.email} style={LABEL_STYLE}>Correo electrónico</label>
+                <input id={ids.email} {...register('email')} type="email" placeholder="correo@ejemplo.com" style={INPUT_STYLE} />
+                <FieldError message={errors.email?.message} />
+              </div>
+
+              <div style={FIELD_STYLE}>
+                <label htmlFor={ids.phone} style={LABEL_STYLE}>Teléfono</label>
+                <input id={ids.phone} {...register('phone')} placeholder="0999999999" style={INPUT_STYLE} />
+              </div>
+
+              <div style={{ ...FIELD_STYLE, gridColumn:'1 / -1' }}>
+                <label htmlFor={ids.address} style={LABEL_STYLE}>Dirección</label>
+                <input id={ids.address} {...register('address')} placeholder="Ej: Av. Principal 123, Manta" style={INPUT_STYLE} />
+              </div>
             </div>
-            <div>
-              <label htmlFor={ids.idNum} className="block text-sm font-medium text-slate-700 mb-1">Identificación</label>
-              <input id={ids.idNum} {...register('identification')} placeholder="Ej: 1350135958" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <FieldError message={errors.identification?.message} />
-            </div>
-            <div className="col-span-2">
-              <label htmlFor={ids.name} className="block text-sm font-medium text-slate-700 mb-1">Nombre completo / Razón social</label>
-              <input id={ids.name} {...register('fullName')} placeholder="Ej: Juan Pérez" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <FieldError message={errors.fullName?.message} />
-            </div>
-            <div>
-              <label htmlFor={ids.email} className="block text-sm font-medium text-slate-700 mb-1">Correo electrónico</label>
-              <input id={ids.email} {...register('email')} type="email" placeholder="correo@ejemplo.com" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <FieldError message={errors.email?.message} />
-            </div>
-            <div>
-              <label htmlFor={ids.phone} className="block text-sm font-medium text-slate-700 mb-1">Teléfono</label>
-              <input id={ids.phone} {...register('phone')} placeholder="0999999999" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div className="col-span-2">
-              <label htmlFor={ids.address} className="block text-sm font-medium text-slate-700 mb-1">Dirección</label>
-              <input id={ids.address} {...register('address')} placeholder="Ej: Av. Principal 123" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            {error && <div className="col-span-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
-            <div className="col-span-2 flex justify-end gap-3">
-              <button type="button" onClick={handleCancel} className="px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Cancelar</button>
-              <button type="submit" disabled={saving} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors">
+
+            {error && (
+              <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', fontSize:'13px', borderRadius:'10px', padding:'10px 14px', marginBottom:'16px', display:'flex', gap:'8px', alignItems:'center' }}>
+                <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true" style={{ flexShrink:0 }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                {error}
+              </div>
+            )}
+
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:'10px', paddingTop:'8px', borderTop:'1px solid #F1F5F9' }}>
+              <button type="button" onClick={handleCancel}
+                style={{ padding:'10px 18px', background:'#F8FAFC', color:'#374151', border:'1px solid #E2E8F0', borderRadius:'10px', fontSize:'14px', fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+                Cancelar
+              </button>
+              <button type="submit" disabled={saving}
+                style={{ padding:'10px 22px', background:'linear-gradient(135deg,#1D4ED8,#3B82F6)', color:'#fff', border:'none', borderRadius:'10px', fontSize:'14px', fontWeight:700, cursor: saving?'not-allowed':'pointer', fontFamily:'inherit', opacity: saving?0.7:1, boxShadow:'0 4px 14px rgba(29,78,216,0.3)' }}>
                 {saving ? 'Guardando...' : 'Guardar cliente'}
               </button>
             </div>
@@ -213,17 +257,17 @@ export default function CustomersPage() {
       )}
 
       {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      <div style={{ background:'#fff', borderRadius:'18px', border:'1px solid #E2E8F0', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/60">
-                {['Tipo', 'Identificación', 'Nombre', 'Correo', 'Teléfono'].map(h => (
-                  <th key={h} scope="col" className="px-5 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
+              <tr style={{ background:'#F8FAFC', borderBottom:'1px solid #E2E8F0' }}>
+                {['Tipo','Identificación','Nombre','Correo','Teléfono'].map(h => (
+                  <th key={h} style={{ padding:'11px 16px', textAlign:'left', fontSize:'11px', fontWeight:700, color:'#94A3B8', textTransform:'uppercase', letterSpacing:'0.07em', whiteSpace:'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">{tableBody}</tbody>
+            <tbody>{tableBody}</tbody>
           </table>
         </div>
       </div>

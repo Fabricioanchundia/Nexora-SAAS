@@ -6,67 +6,62 @@ import api from '@/lib/api';
 
 type Mode = 'login' | 'register';
 
+// ── Decode JWT sin librerías — extrae payload directamente ──────────────────
+function decodeJwt(token: string): Record<string, unknown> {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return {};
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = globalThis.atob(base64);
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+// ── Extrae company_id de la respuesta del login ───────────────────────────────
+function extractCompanyId(body: Record<string, unknown>, token: string): string {
+  // 1. Intentar desde el JWT payload directamente (más confiable)
+  const payload = decodeJwt(token);
+  console.log('[Nexora] JWT payload:', JSON.stringify(payload));
+  const fromJwt = payload.companyId ?? payload.company_id ??
+    (payload.company as Record<string,unknown>)?.id ??
+    payload.sub_company ?? payload.cid;
+  if (fromJwt) return String(fromJwt);
+
+  // 2. Intentar desde la respuesta directa
+  const tries: Array<() => unknown> = [
+    () => (body.company as Record<string,unknown>)?.id,
+    () => (body.user as Record<string,unknown>)?.companyId,
+    () => (body.user as Record<string,unknown>)?.company_id,
+    () => ((body.user as Record<string,unknown>)?.company as Record<string,unknown>)?.id,
+    () => ((body.user as Record<string,unknown>)?.companies as Array<Record<string,unknown>>)?.[0]?.id,
+    () => body.companyId,
+    () => body.company_id,
+  ];
+  for (const fn of tries) {
+    try { const v = fn(); if (v) return String(v); } catch { /* skip */ }
+  }
+  return '';
+}
+
 function NexoraLogoMark({ size = 60 }: Readonly<{ size?: number }>) {
   return (
     <svg width={size} height={size} viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Nexora">
       <defs>
         <linearGradient id="lg1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#00C8FF" />
-          <stop offset="100%" stopColor="#1D4ED8" />
+          <stop offset="0%" stopColor="#00C8FF" /><stop offset="100%" stopColor="#1D4ED8" />
         </linearGradient>
         <linearGradient id="lg2" x1="0%" y1="100%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#3B82F6" />
-          <stop offset="100%" stopColor="#93C5FD" />
+          <stop offset="0%" stopColor="#3B82F6" /><stop offset="100%" stopColor="#93C5FD" />
         </linearGradient>
       </defs>
       <polygon points="28,168 28,32 68,32 68,100 132,32 172,32 172,168 132,168 132,100 68,168" fill="url(#lg1)" />
       <polygon points="68,32 108,32 68,82" fill="url(#lg2)" opacity="0.55" />
       <polygon points="132,168 92,168 132,118" fill="url(#lg2)" opacity="0.55" />
-      <g transform="translate(158,36)">
-        <polygon points="0,-10 2.4,-2.4 10,0 2.4,2.4 0,10 -2.4,2.4 -10,0 -2.4,-2.4" fill="#BAE6FD" />
-      </g>
+      <g transform="translate(158,36)"><polygon points="0,-10 2.4,-2.4 10,0 2.4,2.4 0,10 -2.4,2.4 -10,0 -2.4,-2.4" fill="#BAE6FD" /></g>
     </svg>
   );
-}
-
-// ── Extrae company_id de cualquier estructura de respuesta del backend ────────
-function extractCompanyId(body: Record<string, unknown>): string {
-  // Estructura directa: { company: { id } }
-  const direct = body.company as Record<string, unknown> | undefined;
-  if (direct?.id) return String(direct.id);
-
-  // Dentro de user: { user: { company: { id } } }
-  const user = body.user as Record<string, unknown> | undefined;
-  if (user) {
-    const userCompany = user.company as Record<string, unknown> | undefined;
-    if (userCompany?.id) return String(userCompany.id);
-
-    // Array: { user: { companies: [{ id }] } }
-    const companies = user.companies as Array<Record<string, unknown>> | undefined;
-    if (Array.isArray(companies) && companies.length > 0) {
-      const first = companies[0];
-      if (first?.id) return String(first.id);
-    }
-
-    // Directo en user: { user: { companyId } }
-    if (user.companyId) return String(user.companyId);
-    if (user.company_id) return String(user.company_id);
-  }
-
-  // Raíz: { companyId } o { company_id }
-  if (body.companyId)  return String(body.companyId);
-  if (body.company_id) return String(body.company_id);
-
-  return '';
-}
-
-function extractUserName(body: Record<string, unknown>, fallback: string): string {
-  const user = body.user as Record<string, unknown> | undefined;
-  if (user?.name)     return String(user.name);
-  if (user?.fullName) return String(user.fullName);
-  if (user?.email)    return String(user.email);
-  if (body.name)      return String(body.name);
-  return fallback;
 }
 
 function Spinner() {
@@ -105,13 +100,13 @@ export default function LoginPage() {
   const [lErr,   setLErr]   = useState('');
   const [lLoad,  setLLoad]  = useState(false);
 
-  const [rName,   setRName]   = useState('');
-  const [rEmail,  setREmail]  = useState('');
-  const [rPass,   setRPass]   = useState('');
-  const [rConf,   setRConf]   = useState('');
-  const [rErr,    setRErr]    = useState('');
-  const [rOk,     setROk]     = useState('');
-  const [rLoad,   setRLoad]   = useState(false);
+  const [rName,  setRName]  = useState('');
+  const [rEmail, setREmail] = useState('');
+  const [rPass,  setRPass]  = useState('');
+  const [rConf,  setRConf]  = useState('');
+  const [rErr,   setRErr]   = useState('');
+  const [rOk,    setROk]    = useState('');
+  const [rLoad,  setRLoad]  = useState(false);
 
   const ids = { le:`${baseId}-le`, lp:`${baseId}-lp`, rn:`${baseId}-rn`, re:`${baseId}-re`, rp:`${baseId}-rp`, rc:`${baseId}-rc` };
 
@@ -129,21 +124,19 @@ export default function LoginPage() {
     try {
       const res  = await api.post('/auth/login', { email: lEmail, password: lPass });
       const body = (res.data.data ?? res.data) as Record<string, unknown>;
+      const token = String(body.token ?? body.access_token ?? body.accessToken ?? '');
 
-      const token     = String(body.token ?? body.access_token ?? body.accessToken ?? '');
-      const userName  = extractUserName(body, lEmail);
-      const companyId = extractCompanyId(body);
+      if (!token) { setLErr('El servidor no devolvió token válido.'); return; }
 
-      if (!token) { setLErr('El servidor no devolvió un token válido.'); return; }
+      const userName  = String((body.user as Record<string,unknown>)?.name ?? (body.user as Record<string,unknown>)?.email ?? body.name ?? lEmail);
+      const companyId = extractCompanyId(body, token);
 
       globalThis.localStorage.setItem('nexora_token',      token);
       globalThis.localStorage.setItem('nexora_user_name',  userName);
       globalThis.localStorage.setItem('nexora_company_id', companyId);
 
-      // Log de diagnóstico — ver en DevTools Console
-      console.log('[Nexora Login] Response:', JSON.stringify(body, null, 2));
-      console.log('[Nexora Login] token:', token ? '✓' : '✗');
-      console.log('[Nexora Login] companyId:', companyId || '⚠ VACÍO');
+      console.log('[Nexora Login] body:', JSON.stringify(body, null, 2));
+      console.log('[Nexora Login] companyId guardado:', companyId || '⚠ VACÍO');
 
       router.push('/dashboard');
     } catch (err: unknown) {
@@ -161,7 +154,7 @@ export default function LoginPage() {
     setRLoad(true); setRErr(''); setROk('');
     try {
       await api.post('/auth/register', { name: rName, email: rEmail, password: rPass });
-      setROk('¡Cuenta creada! Redirigiendo al login...');
+      setROk('¡Cuenta creada! Redirigiendo...');
       setRName(''); setREmail(''); setRPass(''); setRConf('');
       setTimeout(() => { setMode('login'); setROk(''); }, 2000);
     } catch (err: unknown) {
@@ -180,24 +173,17 @@ export default function LoginPage() {
         @keyframes nxspin   { to { transform:rotate(360deg); } }
         @keyframes nxfadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
         .nx-card { animation:nxfadeIn 0.35s ease; }
-        .nx-btn:hover:not(:disabled) { filter:brightness(1.08); transform:translateY(-1px); box-shadow:0 8px 24px rgba(29,78,216,0.42) !important; }
+        .nx-btn:hover:not(:disabled) { filter:brightness(1.08); transform:translateY(-1px); }
         .nx-btn:active:not(:disabled) { transform:translateY(0); }
         .nx-btn:disabled { opacity:0.65; cursor:not-allowed; }
       `}</style>
       <div style={{ minHeight:'100vh', background:'linear-gradient(150deg,#EEF2FF 0%,#DBEAFE 55%,#E0F2FE 100%)', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', fontFamily:'system-ui,-apple-system,sans-serif', position:'relative', overflow:'hidden' }}>
-        <div style={{ position:'fixed', top:'-120px', right:'-120px', width:'500px', height:'500px', borderRadius:'50%', background:'radial-gradient(circle,rgba(59,130,246,0.08) 0%,transparent 65%)', pointerEvents:'none' }} />
-        <div style={{ position:'fixed', bottom:'-100px', left:'-100px', width:'400px', height:'400px', borderRadius:'50%', background:'radial-gradient(circle,rgba(14,165,233,0.06) 0%,transparent 65%)', pointerEvents:'none' }} />
-
-        <div className="nx-card" style={{ width:'100%', maxWidth:'420px', background:'rgba(255,255,255,0.94)', backdropFilter:'blur(24px)', borderRadius:'24px', padding:'40px 40px 32px', boxShadow:'0 8px 48px rgba(0,0,0,0.10),0 1px 0 rgba(255,255,255,0.9) inset', border:'1px solid rgba(255,255,255,0.75)' }}>
-
-          {/* Brand */}
+        <div className="nx-card" style={{ width:'100%', maxWidth:'420px', background:'rgba(255,255,255,0.94)', backdropFilter:'blur(24px)', borderRadius:'24px', padding:'40px 40px 32px', boxShadow:'0 8px 48px rgba(0,0,0,0.10)', border:'1px solid rgba(255,255,255,0.75)' }}>
           <div style={{ display:'flex', flexDirection:'column', alignItems:'center', marginBottom:'26px' }}>
             <NexoraLogoMark size={64} />
             <p style={{ fontWeight:800, fontSize:'20px', color:'#0F172A', margin:'12px 0 0', letterSpacing:'0.08em' }}>NEXORA</p>
             <p style={{ fontSize:'10.5px', color:'#94A3B8', margin:'3px 0 0', letterSpacing:'0.14em', fontWeight:500, textTransform:'uppercase' }}>Facturación SRI · Ecuador</p>
           </div>
-
-          {/* Tabs */}
           <div style={{ display:'flex', background:'#F1F5F9', borderRadius:'12px', padding:'4px', marginBottom:'26px', gap:'4px' }}>
             {(['login','register'] as Mode[]).map(m => (
               <button key={m} type="button" onClick={m==='login'?toLogin:toRegister}
@@ -206,8 +192,6 @@ export default function LoginPage() {
               </button>
             ))}
           </div>
-
-          {/* LOGIN */}
           {mode === 'login' && (
             <form onSubmit={doLogin} noValidate>
               <div style={fd}><label htmlFor={ids.le} style={lbl}>Correo electrónico</label><input id={ids.le} type="email" value={lEmail} onChange={e=>setLEmail(e.target.value)} placeholder="correo@empresa.com" autoComplete="email" style={inp} onFocus={foc} onBlur={blu} /></div>
@@ -216,8 +200,6 @@ export default function LoginPage() {
               <button type="submit" disabled={lLoad} className="nx-btn" style={btn}>{lLoad?<><Spinner/>Iniciando...</>:'Iniciar sesión'}</button>
             </form>
           )}
-
-          {/* REGISTER */}
           {mode === 'register' && (
             <form onSubmit={doRegister} noValidate>
               <div style={fd}><label htmlFor={ids.rn} style={lbl}>Nombre completo</label><input id={ids.rn} type="text" value={rName} onChange={e=>setRName(e.target.value)} placeholder="Juan Pérez" autoComplete="name" style={inp} onFocus={foc} onBlur={blu} /></div>
@@ -230,7 +212,6 @@ export default function LoginPage() {
               <p style={{ textAlign:'center', fontSize:'11.5px', color:'#94A3B8', marginTop:'12px', marginBottom:0 }}>Al registrarte aceptas los términos de servicio</p>
             </form>
           )}
-
           <p style={{ textAlign:'center', fontSize:'11px', color:'#CBD5E1', marginTop:'24px', paddingTop:'18px', borderTop:'1px solid #F1F5F9', marginBottom:0 }}>
             © {new Date().getFullYear()} Nexora Labs · Autorizado SRI Ecuador
           </p>
