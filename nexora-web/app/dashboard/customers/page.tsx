@@ -53,7 +53,6 @@ const SELECT_STYLE: React.CSSProperties = {
   ...INPUT_STYLE,
   cursor: 'pointer',
   appearance: 'auto',             // ← muestra la flecha nativa del browser
-  WebkitAppearance: 'auto',
 };
 
 function FieldError({ message }: Readonly<{ message?: string }>) {
