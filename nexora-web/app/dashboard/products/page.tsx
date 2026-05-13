@@ -13,225 +13,183 @@ interface Product {
 }
 
 const IVA_LABELS: Readonly<Record<string, string>> = {
-  '0': '0%', '2': '12%', '4': '15%', '5': '5%', '8': '8%', '6': 'No objeto', '7': 'Exento',
+  '0':'0%', '2':'12%', '4':'15%', '5':'5%', '8':'8%', '6':'No objeto', '7':'Exento',
 };
 
 interface ProductFormData {
-  code: string;
-  name: string;
-  description: string;
-  unitPrice: string;
-  ivaRate: string;
+  code: string; name: string; description: string;
+  unitPrice: string; ivaRate: string;
 }
 
-const EMPTY_FORM: ProductFormData = {
-  code: '', name: '', description: '', unitPrice: '', ivaRate: '4',
-};
+const EMPTY_FORM: ProductFormData = { code:'', name:'', description:'', unitPrice:'', ivaRate:'4' };
+
+// Estilos inline garantizados
+const INP: React.CSSProperties = { width:'100%', boxSizing:'border-box', border:'1.5px solid #E2E8F0', borderRadius:'10px', padding:'10px 14px', fontSize:'14px', color:'#0F172A', background:'#fff', outline:'none', fontFamily:'inherit' };
+const SEL: React.CSSProperties = { ...INP, cursor:'pointer' };
+const LBL: React.CSSProperties = { display:'block', fontSize:'13px', fontWeight:600, color:'#374151', marginBottom:'6px' };
+const FD:  React.CSSProperties = { marginBottom:'14px' };
 
 export default function ProductsPage() {
   const baseId = useId();
-  const [products, setProducts]   = useState<Product[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [showForm, setShowForm]   = useState(false);
-  const [saving, setSaving]       = useState(false);
-  const [form, setForm]           = useState<ProductFormData>(EMPTY_FORM);
-  const [error, setError]         = useState('');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [form, setForm]         = useState<ProductFormData>(EMPTY_FORM);
+  const [error, setError]       = useState('');
 
-  // S6853: IDs for all form controls
   const ids = {
-    code:        `${baseId}-code`,
-    name:        `${baseId}-name`,
-    description: `${baseId}-desc`,
-    unitPrice:   `${baseId}-price`,
-    ivaRate:     `${baseId}-iva`,
+    code:`${baseId}-code`, name:`${baseId}-name`,
+    desc:`${baseId}-desc`, price:`${baseId}-price`, iva:`${baseId}-iva`,
   };
 
   const loadProducts = useCallback(() => {
     api.get('/products')
       .then(res => {
-        const data = res.data.data;
-        setProducts(Array.isArray(data) ? data : data?.products ?? []);
+        const d = res.data.data;
+        setProducts(Array.isArray(d) ? d : d?.products ?? []);
       })
-      .catch((err: unknown) => console.error('[ProductsPage]', err))
+      .catch((err: unknown) => console.error('[Products]', err))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
-  const handleToggleForm = useCallback(() => {
-    setShowForm(prev => !prev);
-    setForm(EMPTY_FORM);
-    setError('');
-  }, []);
-
-  const handleFieldChange = useCallback((field: keyof ProductFormData) =>
+  const handleField = useCallback((field: keyof ProductFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
       setForm(prev => ({ ...prev, [field]: e.target.value }));
     }, []);
 
   const handleSave = useCallback(async () => {
-    if (!form.code || !form.name || !form.unitPrice) {
-      setError('Código, nombre y precio son requeridos');
-      return;
-    }
-    setSaving(true);
-    setError('');
+    if (!form.code || !form.name || !form.unitPrice) { setError('Código, nombre y precio son requeridos'); return; }
+    setSaving(true); setError('');
     try {
       await api.post('/products', {
-        code:        form.code,
-        name:        form.name,
-        description: form.description,
-        // S7773: Number.parseFloat instead of parseFloat
-        unitPrice:   Number.parseFloat(form.unitPrice),
-        ivaRate:     form.ivaRate,
+        code: form.code, name: form.name, description: form.description,
+        unitPrice: Number.parseFloat(form.unitPrice), ivaRate: form.ivaRate,
       });
-      setForm(EMPTY_FORM);
-      setShowForm(false);
-      loadProducts();
+      setForm(EMPTY_FORM); setShowForm(false); loadProducts();
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { message?: string | string[] } } };
-      const msg = axiosErr.response?.data?.message;
-      setError(Array.isArray(msg) ? msg[0] : msg ?? 'Error al guardar producto');
-    } finally {
-      setSaving(false);
-    }
+      const ax = err as { response?: { data?: { message?: string | string[] } } };
+      const m  = ax.response?.data?.message;
+      setError(Array.isArray(m) ? m[0] : m ?? 'Error al guardar producto');
+    } finally { setSaving(false); }
   }, [form, loadProducts]);
 
-  // S3358: resolve table body without nested ternary
   let tableBody: React.ReactNode;
   if (loading) {
-    tableBody = (
-      <tr><td colSpan={5} className="p-8 text-center text-slate-400 text-sm">Cargando productos...</td></tr>
-    );
+    tableBody = <tr><td colSpan={5} style={{ padding:'40px', textAlign:'center', color:'#94A3B8', fontSize:'13px' }}>Cargando productos...</td></tr>;
   } else if (products.length === 0) {
     tableBody = (
-      <tr><td colSpan={5}>
-        <div className="flex flex-col items-center py-12 text-center">
-          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center mb-3 text-slate-400">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-            </svg>
-          </div>
-          <p className="text-sm font-medium text-slate-600 mb-1">Sin productos</p>
-          <p className="text-xs text-slate-400">Agrega productos o servicios para incluirlos en tus facturas.</p>
-        </div>
+      <tr><td colSpan={5} style={{ padding:'48px 20px', textAlign:'center' }}>
+        <p style={{ color:'#475569', fontWeight:600, fontSize:'14px', margin:'0 0 4px' }}>Sin productos</p>
+        <p style={{ color:'#94A3B8', fontSize:'12.5px', margin:0 }}>Agrega productos o servicios para incluirlos en tus facturas</p>
       </td></tr>
     );
   } else {
-    tableBody = products.map(p => (
-      (() => {
-        let ivaMultiplier = 0;
-        if (p.ivaRate === '2') {
-          ivaMultiplier = 0.12;
-        } else if (p.ivaRate === '4') {
-          ivaMultiplier = 0.15;
-        }
-
-        return (
-          <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-            <td className="px-5 py-3.5">
-              <span className="font-mono text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{p.code}</span>
-            </td>
-            <td className="px-5 py-3.5">
-              <p className="font-medium text-slate-800">{p.name}</p>
-              {p.description && <p className="text-xs text-slate-400 mt-0.5 truncate max-w-xs">{p.description}</p>}
-            </td>
-            <td className="px-5 py-3.5 font-semibold text-slate-800">${Number(p.unitPrice).toFixed(2)}</td>
-            <td className="px-5 py-3.5">
-              <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${p.ivaRate === '0' ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-                {IVA_LABELS[p.ivaRate] ?? p.ivaRate}
-              </span>
-            </td>
-            <td className="px-5 py-3.5 text-slate-600 text-sm">
-              ${(Number(p.unitPrice) * (1 + ivaMultiplier)).toFixed(2)}
-            </td>
-          </tr>
-        );
-      })()
-    ));
+    tableBody = products.map(p => {
+      const ivaNum = p.ivaRate === '2' ? 0.12 : p.ivaRate === '4' ? 0.15 : p.ivaRate === '5' ? 0.05 : 0;
+      const total  = Number(p.unitPrice) * (1 + ivaNum);
+      const ivaColored = ['2','4','5'].includes(p.ivaRate);
+      return (
+        <tr key={p.id} style={{ borderBottom:'1px solid #F8FAFC' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background='#F8FAFC'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background='transparent'; }}>
+          <td style={{ padding:'12px 16px' }}>
+            <span style={{ fontFamily:'monospace', fontSize:'12px', fontWeight:600, color:'#475569', background:'#F1F5F9', padding:'3px 8px', borderRadius:'6px' }}>{p.code}</span>
+          </td>
+          <td style={{ padding:'12px 16px' }}>
+            <p style={{ fontWeight:600, color:'#0F172A', margin:'0 0 2px', fontSize:'14px' }}>{p.name}</p>
+            {p.description && <p style={{ color:'#94A3B8', fontSize:'12px', margin:0 }}>{p.description}</p>}
+          </td>
+          <td style={{ padding:'12px 16px', fontWeight:700, color:'#0F172A', fontSize:'14px' }}>${Number(p.unitPrice).toFixed(2)}</td>
+          <td style={{ padding:'12px 16px' }}>
+            <span style={{ display:'inline-flex', alignItems:'center', background: ivaColored ? '#EFF6FF' : '#F8FAFC', color: ivaColored ? '#1D4ED8' : '#64748B', border:`1px solid ${ivaColored ? '#BFDBFE' : '#E2E8F0'}`, borderRadius:'20px', fontSize:'12px', fontWeight:600, padding:'3px 10px' }}>
+              {IVA_LABELS[p.ivaRate] ?? p.ivaRate}
+            </span>
+          </td>
+          <td style={{ padding:'12px 16px', fontWeight:700, color:'#0F172A', fontSize:'14px' }}>${total.toFixed(2)}</td>
+        </tr>
+      );
+    });
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+    <div style={{ padding:'32px 36px', background:'#F1F5F9', minHeight:'100vh', fontFamily:'system-ui,-apple-system,sans-serif' }}>
+
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'24px' }}>
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Productos</h1>
-          <p className="mt-1 text-sm text-slate-500">Gestiona tu catálogo de productos y servicios</p>
+          <h1 style={{ fontSize:'24px', fontWeight:800, color:'#0F172A', margin:'0 0 4px', letterSpacing:'-0.01em' }}>Productos</h1>
+          <p style={{ fontSize:'13px', color:'#64748B', margin:0 }}>Gestiona tu catálogo de productos y servicios</p>
         </div>
-        <button type="button" onClick={handleToggleForm}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-blue-600/20">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={showForm ? 'M6 18L18 6M6 6l12 12' : 'M12 4v16m8-8H4'} />
+        <button type="button" onClick={() => { setShowForm(p => !p); setForm(EMPTY_FORM); setError(''); }}
+          style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background: showForm ? '#F1F5F9' : 'linear-gradient(135deg,#1D4ED8,#3B82F6)', color: showForm ? '#374151' : '#fff', border: showForm ? '1px solid #E2E8F0' : 'none', borderRadius:'12px', fontSize:'14px', fontWeight:700, cursor:'pointer', fontFamily:'inherit', boxShadow: showForm ? 'none' : '0 4px 14px rgba(29,78,216,0.3)' }}>
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d={showForm ? 'M6 18L18 6M6 6l12 12' : 'M12 4v16m8-8H4'}/>
           </svg>
-          {showForm ? 'Cancelar' : 'Nuevo producto'}
+          {showForm ? 'Cancelar' : '+ Nuevo producto'}
         </button>
       </div>
 
-      {/* Form */}
       {showForm && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
-          <h2 className="text-base font-semibold text-slate-900 mb-4">Nuevo producto</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor={ids.code} className="block text-sm font-medium text-slate-700 mb-1">Código</label>
-              <input id={ids.code} type="text" value={form.code} onChange={handleFieldChange('code')} placeholder="Ej: PROD-001"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <div style={{ background:'#fff', borderRadius:'18px', border:'1px solid #E2E8F0', padding:'24px', marginBottom:'20px', boxShadow:'0 2px 8px rgba(0,0,0,0.04)' }}>
+          <h2 style={{ fontSize:'16px', fontWeight:700, color:'#0F172A', margin:'0 0 20px' }}>Nuevo producto</h2>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'14px' }}>
+            <div style={FD}>
+              <label htmlFor={ids.code} style={LBL}>Código</label>
+              <input id={ids.code} type="text" value={form.code} onChange={handleField('code')} placeholder="Ej: PROD-001" style={INP}/>
             </div>
-            <div>
-              <label htmlFor={ids.name} className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
-              <input id={ids.name} type="text" value={form.name} onChange={handleFieldChange('name')} placeholder="Ej: Servicio de consultoría"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div style={FD}>
+              <label htmlFor={ids.name} style={LBL}>Nombre</label>
+              <input id={ids.name} type="text" value={form.name} onChange={handleField('name')} placeholder="Ej: Servicio de consultoría" style={INP}/>
             </div>
-            <div className="col-span-2">
-              <label htmlFor={ids.description} className="block text-sm font-medium text-slate-700 mb-1">Descripción</label>
-              <input id={ids.description} type="text" value={form.description} onChange={handleFieldChange('description')} placeholder="Descripción opcional"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div style={{ ...FD, gridColumn:'1 / -1' }}>
+              <label htmlFor={ids.desc} style={LBL}>Descripción <span style={{ color:'#94A3B8', fontWeight:400 }}>(opcional)</span></label>
+              <input id={ids.desc} type="text" value={form.description} onChange={handleField('description')} placeholder="Descripción breve del producto" style={INP}/>
             </div>
-            <div>
-              <label htmlFor={ids.unitPrice} className="block text-sm font-medium text-slate-700 mb-1">Precio unitario</label>
-              <input id={ids.unitPrice} type="number" step="0.01" min="0" value={form.unitPrice} onChange={handleFieldChange('unitPrice')} placeholder="0.00"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div style={FD}>
+              <label htmlFor={ids.price} style={LBL}>Precio unitario (sin IVA)</label>
+              <input id={ids.price} type="number" step="0.01" min="0" value={form.unitPrice} onChange={handleField('unitPrice')} placeholder="0.00" style={INP}/>
             </div>
-            <div>
-              <label htmlFor={ids.ivaRate} className="block text-sm font-medium text-slate-700 mb-1">IVA</label>
-              <select id={ids.ivaRate} value={form.ivaRate} onChange={handleFieldChange('ivaRate')}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="0">0%</option>
+            <div style={FD}>
+              <label htmlFor={ids.iva} style={LBL}>IVA</label>
+              <select id={ids.iva} value={form.ivaRate} onChange={handleField('ivaRate')} style={SEL}>
+                <option value="4">15% (vigente 2025)</option>
                 <option value="2">12%</option>
-                <option value="4">15%</option>
+                <option value="0">0%</option>
                 <option value="5">5%</option>
-                <option value="6">No objeto</option>
-                <option value="7">Exento</option>
+                <option value="6">No objeto de IVA</option>
+                <option value="7">Exento de IVA</option>
               </select>
             </div>
           </div>
-          {error && <div className="mt-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
-          <div className="flex justify-end gap-3 mt-4">
-            <button type="button" onClick={handleToggleForm}
-              className="px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+          {error && (
+            <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', fontSize:'13px', borderRadius:'10px', padding:'10px 14px', marginBottom:'14px' }}>{error}</div>
+          )}
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:'10px', paddingTop:'8px', borderTop:'1px solid #F1F5F9' }}>
+            <button type="button" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}
+              style={{ padding:'10px 18px', background:'#F8FAFC', color:'#374151', border:'1px solid #E2E8F0', borderRadius:'10px', fontSize:'14px', fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
               Cancelar
             </button>
             <button type="button" onClick={handleSave} disabled={saving}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors">
+              style={{ padding:'10px 22px', background:'linear-gradient(135deg,#1D4ED8,#3B82F6)', color:'#fff', border:'none', borderRadius:'10px', fontSize:'14px', fontWeight:700, cursor: saving ? 'not-allowed' : 'pointer', fontFamily:'inherit', opacity: saving ? 0.7 : 1, boxShadow:'0 4px 14px rgba(29,78,216,0.3)' }}>
               {saving ? 'Guardando...' : 'Guardar producto'}
             </button>
           </div>
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      <div style={{ background:'#fff', borderRadius:'18px', border:'1px solid #E2E8F0', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/60">
-                {['Código', 'Nombre', 'Precio', 'IVA', 'Precio + IVA'].map(h => (
-                  <th key={h} scope="col" className="px-5 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
+              <tr style={{ background:'#F8FAFC', borderBottom:'1px solid #E2E8F0' }}>
+                {['Código','Nombre','Precio','IVA','Precio + IVA'].map(h => (
+                  <th key={h} style={{ padding:'11px 16px', textAlign:'left', fontSize:'11px', fontWeight:700, color:'#94A3B8', textTransform:'uppercase', letterSpacing:'0.07em', whiteSpace:'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">{tableBody}</tbody>
+            <tbody>{tableBody}</tbody>
           </table>
         </div>
       </div>

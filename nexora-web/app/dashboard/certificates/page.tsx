@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useId } from 'react';
+import { useEffect, useState, useCallback, useId, useRef } from 'react';
 import api from '@/lib/api';
 
 interface Certificate {
@@ -15,16 +15,22 @@ function daysUntil(dateStr: string): number {
   return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
 }
 
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export default function CertificatesPage() {
-  const baseId = useId();
-  const fileId = `${baseId}-file`;
-  const passId = `${baseId}-pass`;
+  const baseId  = useId();
+  const passId  = `${baseId}-pass`;
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [loading, setLoading]     = useState(true);
   const [uploading, setUploading] = useState(false);
   const [passphrase, setPassphrase] = useState('');
   const [file, setFile]           = useState<File | null>(null);
+  const [dragOver, setDragOver]   = useState(false);
+  const [showPass, setShowPass]   = useState(false);
   const [error, setError]         = useState('');
   const [success, setSuccess]     = useState('');
 
@@ -41,12 +47,29 @@ export default function CertificatesPage() {
   useEffect(() => { loadCertificates(); }, [loadCertificates]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setFile(e.target.files?.[0] ?? null);
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
+    setError('');
   }, []);
 
-  const handlePassChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setPassphrase(e.target.value);
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f && (f.name.endsWith('.p12') || f.name.endsWith('.pfx'))) {
+      setFile(f);
+      setError('');
+    } else {
+      setError('Solo se aceptan archivos .p12 o .pfx');
+    }
   }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setDragOver(false), []);
 
   const handleUpload = useCallback(async () => {
     if (!file || !passphrase) {
@@ -63,9 +86,10 @@ export default function CertificatesPage() {
       await api.post('/certificates/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setSuccess('Certificado subido y validado correctamente');
+      setSuccess('✓ Certificado subido y validado correctamente');
       setFile(null);
       setPassphrase('');
+      if (fileRef.current) fileRef.current.value = '';
       loadCertificates();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string | string[] } } };
@@ -76,174 +100,267 @@ export default function CertificatesPage() {
     }
   }, [file, passphrase, loadCertificates]);
 
-  // S3358: no nested ternary
-  let tableBody: React.ReactNode;
-  if (loading) {
-    tableBody = (
-      <tr><td colSpan={4} className="py-10 text-center">
-        <div className="flex justify-center">
-          <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        </div>
-      </td></tr>
-    );
-  } else if (certificates.length === 0) {
-    tableBody = (
-      <tr><td colSpan={4} className="py-12 text-center">
-        <p className="text-sm text-slate-500">No hay certificados registrados</p>
-        <p className="text-xs text-slate-400 mt-1">Sube tu certificado BCE .p12 para firmar facturas</p>
-      </td></tr>
-    );
-  } else {
-    tableBody = certificates.map(c => {
-      const days   = daysUntil(c.validUntil);
-      const expCls = days <= 30 ? 'text-red-600' : days <= 90 ? 'text-amber-600' : 'text-slate-600';
-      return (
-        <tr key={c.id} className="hover:bg-slate-50 transition-colors">
-          <td className="px-5 py-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                {/* ── Properly sized icon — NOT using SVG as file input label ── */}
-                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} className="text-blue-600" aria-hidden="true">
-                  <circle cx="12" cy="8" r="6"/>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/>
-                </svg>
-              </div>
-              <span className="font-medium text-slate-800 text-sm">{c.holderName ?? 'Sin nombre'}</span>
-            </div>
-          </td>
-          <td className="px-5 py-4 text-sm text-slate-500">
-            {new Date(c.validFrom).toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' })}
-          </td>
-          <td className="px-5 py-4">
-            <p className={`text-sm font-medium ${expCls}`}>
-              {new Date(c.validUntil).toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' })}
-            </p>
-            {days <= 90 && (
-              <p className={`text-xs mt-0.5 ${expCls}`}>
-                {days > 0 ? `Vence en ${days} días` : 'Expirado'}
-              </p>
-            )}
-          </td>
-          <td className="px-5 py-4">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${c.isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${c.isActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-              {c.isActive ? 'Activo' : 'Inactivo'}
-            </span>
-          </td>
-        </tr>
-      );
-    });
-  }
-
   return (
-    <div className="p-8 max-w-3xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Certificados</h1>
-        <p className="mt-1 text-sm text-slate-500">Gestiona tu certificado digital BCE para firma electrónica XAdES-BES</p>
+    <div style={{ padding:'32px 36px', maxWidth:'820px', margin:'0 auto', fontFamily:'system-ui,-apple-system,sans-serif' }}>
+
+      {/* Header */}
+      <div style={{ marginBottom:'28px' }}>
+        <h1 style={{ fontSize:'24px', fontWeight:800, color:'#0F172A', margin:'0 0 4px' }}>Certificados</h1>
+        <p style={{ color:'#64748B', fontSize:'13px', margin:0 }}>Gestiona tu certificado digital BCE para firma electrónica XAdES-BES</p>
       </div>
 
       {/* Upload card */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6 shadow-sm">
-        <div className="flex items-center gap-3 mb-5">
-          {/* ── Properly sized upload icon in a box — not as SVG label ── */}
-          <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
-            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} className="text-blue-600" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+      <div style={{ background:'#fff', borderRadius:'20px', border:'1px solid #E2E8F0', padding:'28px', marginBottom:'20px', boxShadow:'0 2px 8px rgba(0,0,0,0.04)' }}>
+
+        {/* Card header */}
+        <div style={{ display:'flex', alignItems:'center', gap:'14px', marginBottom:'24px' }}>
+          <div style={{ width:'44px', height:'44px', borderRadius:'14px', background:'linear-gradient(135deg,#EFF6FF,#DBEAFE)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#2563EB" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
             </svg>
           </div>
           <div>
-            <h2 className="text-base font-semibold text-slate-900">Subir certificado .p12</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Archivo emitido por el Banco Central del Ecuador</p>
+            <h2 style={{ fontSize:'16px', fontWeight:700, color:'#0F172A', margin:'0 0 3px' }}>Subir certificado .p12</h2>
+            <p style={{ fontSize:'12.5px', color:'#94A3B8', margin:0 }}>Archivo emitido por el Banco Central del Ecuador (BCE)</p>
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label htmlFor={fileId} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
-              Archivo .p12 / .pfx
-            </label>
-            <input
-              id={fileId}
-              type="file"
-              accept=".p12,.pfx"
-              onChange={handleFileChange}
-              className="w-full border border-dashed border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-600 bg-slate-50 hover:bg-slate-100 cursor-pointer focus:outline-none"
-            />
-          </div>
+        {/* Drag & drop zone */}
+        <div
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onClick={() => fileRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click(); }}
+          aria-label="Zona para subir certificado .p12"
+          style={{
+            border: dragOver ? '2px solid #3B82F6' : file ? '2px solid #22C55E' : '2px dashed #CBD5E1',
+            borderRadius: '16px',
+            padding: '28px 20px',
+            textAlign: 'center',
+            cursor: 'pointer',
+            background: dragOver ? '#EFF6FF' : file ? '#F0FDF4' : '#F8FAFC',
+            transition: 'all 0.2s',
+            marginBottom: '16px',
+          }}
+        >
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".p12,.pfx"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+            aria-hidden="true"
+          />
 
-          <div>
-            <label htmlFor={passId} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
-              Contraseña del certificado
-            </label>
-            <input
-              id={passId}
-              type="password"
-              value={passphrase}
-              onChange={handlePassChange}
-              placeholder="Contraseña del archivo .p12"
-              className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all placeholder:text-slate-400"
-            />
-          </div>
-
-          {error && (
-            <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              {error}
+          {file ? (
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'8px' }}>
+              <div style={{ width:'44px', height:'44px', borderRadius:'12px', background:'#DCFCE7', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#16A34A" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p style={{ color:'#15803D', fontWeight:700, fontSize:'14px', margin:0 }}>{file.name}</p>
+              <p style={{ color:'#86EFAC', fontSize:'12px', margin:0 }}>{(file.size / 1024).toFixed(1)} KB · Haz clic para cambiar</p>
             </div>
-          )}
-          {success && (
-            <div className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl px-4 py-3">
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              {success}
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleUpload}
-            disabled={uploading}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition-colors"
-          >
-            {uploading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Subiendo...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'8px' }}>
+              <div style={{ width:'44px', height:'44px', borderRadius:'12px', background: dragOver ? '#DBEAFE' : '#F1F5F9', display:'flex', alignItems:'center', justifyContent:'center', transition:'background 0.2s' }}>
+                <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke={dragOver ? '#3B82F6' : '#94A3B8'} strokeWidth={1.8} aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-                Subir certificado
-              </>
-            )}
-          </button>
+              </div>
+              <div>
+                <p style={{ color: dragOver ? '#2563EB' : '#374151', fontWeight:600, fontSize:'14px', margin:'0 0 3px' }}>
+                  {dragOver ? 'Suelta el archivo aquí' : 'Arrastra tu archivo .p12 o haz clic'}
+                </p>
+                <p style={{ color:'#94A3B8', fontSize:'12px', margin:0 }}>Formatos: .p12, .pfx</p>
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* Password field */}
+        <div style={{ marginBottom:'16px' }}>
+          <label htmlFor={passId} style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#374151', marginBottom:'6px' }}>
+            Contraseña del certificado
+          </label>
+          <div style={{ position:'relative' }}>
+            <input
+              id={passId}
+              type={showPass ? 'text' : 'password'}
+              value={passphrase}
+              onChange={e => setPassphrase(e.target.value)}
+              placeholder="Contraseña del archivo .p12"
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                border: '1.5px solid #E2E8F0',
+                borderRadius: '12px',
+                padding: '11px 44px 11px 14px',
+                fontSize: '14px',
+                color: '#0F172A',
+                background: '#F8FAFC',
+                outline: 'none',
+                fontFamily: 'inherit',
+                transition: 'border-color 0.15s',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPass(p => !p)}
+              aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              style={{ position:'absolute', right:'12px', top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', color:'#94A3B8', padding:'4px', display:'flex', alignItems:'center' }}
+            >
+              {showPass ? (
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Error / Success */}
+        {error && (
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', fontSize:'13px', borderRadius:'12px', padding:'12px 16px', marginBottom:'16px' }}>
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink:0 }} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            {error}
+          </div>
+        )}
+        {success && (
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#15803D', fontSize:'13px', borderRadius:'12px', padding:'12px 16px', marginBottom:'16px' }}>
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink:0 }} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            {success}
+          </div>
+        )}
+
+        {/* Submit button */}
+        <button
+          type="button"
+          onClick={handleUpload}
+          disabled={uploading || !file || !passphrase}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
+            padding: '12px 24px',
+            background: uploading || !file || !passphrase
+              ? '#E2E8F0'
+              : 'linear-gradient(135deg,#1D4ED8,#3B82F6)',
+            color: uploading || !file || !passphrase ? '#94A3B8' : '#fff',
+            border: 'none', borderRadius: '12px',
+            fontSize: '14px', fontWeight: 700,
+            cursor: uploading || !file || !passphrase ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            transition: 'all 0.15s',
+            boxShadow: !uploading && file && passphrase ? '0 4px 14px rgba(29,78,216,0.3)' : 'none',
+          }}
+        >
+          {uploading ? (
+            <>
+              <div style={{ width:'16px', height:'16px', border:'2.5px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
+              Subiendo y validando...
+            </>
+          ) : (
+            <>
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Subir y validar certificado
+            </>
+          )}
+        </button>
+
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
 
-      {/* Certificates table */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">Certificados registrados</h2>
-          <span className="text-xs text-slate-400">{certificates.length} certificado{certificates.length !== 1 ? 's' : ''}</span>
+      {/* Certificates list */}
+      <div style={{ background:'#fff', borderRadius:'20px', border:'1px solid #E2E8F0', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
+        <div style={{ padding:'18px 24px', borderBottom:'1px solid #F1F5F9', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <h2 style={{ fontSize:'15px', fontWeight:700, color:'#0F172A', margin:0 }}>Certificados registrados</h2>
+          <span style={{ fontSize:'12px', color:'#94A3B8', background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:'20px', padding:'3px 12px' }}>
+            {certificates.length} certificado{certificates.length !== 1 ? 's' : ''}
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th scope="col" className="px-5 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Titular</th>
-                <th scope="col" className="px-5 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Válido desde</th>
-                <th scope="col" className="px-5 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Válido hasta</th>
-                <th scope="col" className="px-5 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">{tableBody}</tbody>
-          </table>
-        </div>
+
+        {loading ? (
+          <div style={{ padding:'48px', textAlign:'center' }}>
+            <div style={{ width:'28px', height:'28px', border:'3px solid #E2E8F0', borderTopColor:'#3B82F6', borderRadius:'50%', animation:'spin 0.8s linear infinite', margin:'0 auto' }} />
+          </div>
+        ) : certificates.length === 0 ? (
+          <div style={{ padding:'48px 20px', textAlign:'center' }}>
+            <div style={{ width:'48px', height:'48px', background:'#F1F5F9', borderRadius:'14px', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 12px' }}>
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#94A3B8" strokeWidth={1.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+              </svg>
+            </div>
+            <p style={{ color:'#475569', fontWeight:600, fontSize:'14px', margin:'0 0 4px' }}>Sin certificados</p>
+            <p style={{ color:'#94A3B8', fontSize:'12.5px', margin:0 }}>Sube tu certificado BCE .p12 para firmar facturas</p>
+          </div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column' }}>
+            {certificates.map(c => {
+              const days   = daysUntil(c.validUntil);
+              const expiring = days <= 30;
+              const warning  = days > 30 && days <= 90;
+              const expColor = expiring ? '#DC2626' : warning ? '#D97706' : '#64748B';
+              const expBg    = expiring ? '#FEF2F2' : warning ? '#FFFBEB' : '#F8FAFC';
+
+              return (
+                <div key={c.id} style={{ display:'flex', alignItems:'center', gap:'16px', padding:'18px 24px', borderBottom:'1px solid #F8FAFC' }}>
+                  {/* Icon */}
+                  <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'linear-gradient(135deg,#EFF6FF,#DBEAFE)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#2563EB" strokeWidth={1.8} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                    </svg>
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontWeight:700, color:'#0F172A', fontSize:'14px', margin:'0 0 3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {c.holderName ?? 'Sin nombre'}
+                    </p>
+                    <p style={{ color:'#94A3B8', fontSize:'12px', margin:0 }}>
+                      Válido {formatDate(c.validFrom)} — {formatDate(c.validUntil)}
+                    </p>
+                  </div>
+
+                  {/* Expiry badge */}
+                  {days <= 90 && (
+                    <div style={{ background:expBg, border:`1px solid ${expColor}30`, borderRadius:'10px', padding:'5px 12px', textAlign:'center', flexShrink:0 }}>
+                      <p style={{ color:expColor, fontSize:'11px', fontWeight:700, margin:0 }}>
+                        {days > 0 ? `${days}d restantes` : 'Expirado'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Status */}
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    padding: '5px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600,
+                    background: c.isActive ? '#F0FDF4' : '#F8FAFC',
+                    color: c.isActive ? '#15803D' : '#94A3B8',
+                    border: `1px solid ${c.isActive ? '#BBF7D0' : '#E2E8F0'}`,
+                    flexShrink: 0,
+                  }}>
+                    <span style={{ width:'6px', height:'6px', borderRadius:'50%', background: c.isActive ? '#22C55E' : '#CBD5E1', flexShrink:0 }} />
+                    {c.isActive ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

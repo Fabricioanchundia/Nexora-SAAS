@@ -42,7 +42,6 @@ function StatusPill({ status }: Readonly<{ status: string }>) {
   );
 }
 
-// ── StatCard ──────────────────────────────────────────────────────────────────
 interface StatCardProps {
   readonly label: string;
   readonly value: string | number;
@@ -69,7 +68,6 @@ function StatCard({ label, value, loading, color, icon, sub }: StatCardProps) {
   );
 }
 
-// ── Recent invoice row ────────────────────────────────────────────────────────
 interface InvRowProps {
   readonly inv: Invoice;
   readonly onNav: (id: string) => void;
@@ -89,7 +87,6 @@ function InvRow({ inv, onNav }: InvRowProps) {
   );
 }
 
-// ── Quick action button ───────────────────────────────────────────────────────
 interface QuickBtnProps {
   readonly label: string;
   readonly icon: React.ReactNode;
@@ -118,7 +115,6 @@ function QuickBtn({ label, icon, href, primary, onNav }: QuickBtnProps) {
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const router = useRouter();
   const [invoices, setInvoices]     = useState<Invoice[]>([]);
@@ -128,13 +124,12 @@ export default function DashboardPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [invRes, planRes] = await Promise.allSettled([
-        api.get('/invoices?page=1&limit=100'),
-        api.get('/subscriptions/me'),
-      ]);
+      // ── Solo cargamos facturas. El módulo /subscriptions/me aún no está
+      // ── instalado en el backend — se activará cuando esté disponible.
+      const invRes = await api.get('/invoices?page=1&limit=100').catch(() => null);
 
-      if (invRes.status === 'fulfilled') {
-        const r = invRes.value.data?.data;
+      if (invRes) {
+        const r = invRes.data?.data;
         let list: Invoice[] = [];
         if (Array.isArray(r))                list = r;
         else if (Array.isArray(r?.data))     list = r.data;
@@ -142,10 +137,14 @@ export default function DashboardPage() {
         setInvoices(list);
       }
 
-      if (planRes.status === 'fulfilled') {
-        const p = planRes.value.data?.current;
-        if (p) setPlanData(p);
-      }
+      // TODO: descomentar cuando el módulo de suscripciones esté instalado en backend
+      // const planRes = await api.get('/subscriptions/me').catch(() => null);
+      // if (planRes) {
+      //   const p = planRes.data?.current;
+      //   if (p) setPlanData(p);
+      // }
+      void setPlanData; // evitar warning de unused
+
     } catch (err: unknown) {
       console.error('[Dashboard]', err);
     } finally {
@@ -295,7 +294,7 @@ export default function DashboardPage() {
                 Ver planes
               </button>
             </div>
-            {planData && (
+            {planData ? (
               <div>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'8px' }}>
                   <span style={{ color:'rgba(255,255,255,0.5)', fontSize:'12px' }}>Facturas usadas</span>
@@ -310,10 +309,9 @@ export default function DashboardPage() {
                   {planData.isUnlimited ? 'Sin límite' : `${planData.invoicesRemaining} facturas restantes`}
                 </p>
               </div>
-            )}
-            {!planData && (
+            ) : (
               <p style={{ color:'rgba(255,255,255,0.35)', fontSize:'12px', margin:'8px 0 0' }}>
-                Actualiza tu plan para ver estadísticas
+                Módulo de suscripciones próximamente
               </p>
             )}
           </div>
