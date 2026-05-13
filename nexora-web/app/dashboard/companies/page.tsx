@@ -15,7 +15,29 @@ interface Company {
   isActive: boolean;
 }
 
-const INPUT_CLS = 'w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all disabled:bg-slate-50 disabled:text-slate-400';
+// ── Estilos inline garantizados ───────────────────────────────────────────────
+const INPUT_STYLE: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box',
+  border: '1.5px solid #E2E8F0', borderRadius: '10px',
+  padding: '10px 14px', fontSize: '14px',
+  color: '#0F172A', background: '#F8FAFC',
+  outline: 'none', fontFamily: 'inherit',
+  transition: 'border-color 0.15s',
+};
+
+const INPUT_DISABLED: React.CSSProperties = {
+  ...INPUT_STYLE,
+  color: '#94A3B8', background: '#F1F5F9', cursor: 'not-allowed',
+};
+
+const SELECT_STYLE: React.CSSProperties = {
+  ...INPUT_STYLE, cursor: 'pointer', appearance: 'auto',
+};
+
+const LABEL_STYLE: React.CSSProperties = {
+  display: 'block', fontSize: '11px', fontWeight: 700,
+  color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px',
+};
 
 export default function CompaniesPage() {
   const baseId = useId();
@@ -69,31 +91,34 @@ export default function CompaniesPage() {
 
   if (loading) {
     return (
-      <div className="p-8 flex items-center justify-center min-h-64">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-slate-400">Cargando...</p>
-        </div>
+      <div style={{ padding: '48px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        <div style={{ width: '28px', height: '28px', border: '3px solid #E2E8F0', borderTopColor: '#3B82F6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ color: '#94A3B8', fontSize: '13px', margin: 0 }}>Cargando empresa...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Empresas</h1>
-        <p className="mt-1 text-sm text-slate-500">Gestiona los datos de tu empresa emisora en el SRI</p>
+    <div style={{ padding: '32px 36px', maxWidth: '860px', margin: '0 auto', fontFamily: 'system-ui,-apple-system,sans-serif' }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* Header */}
+      <div style={{ marginBottom: '28px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#0F172A', margin: '0 0 4px' }}>Empresas</h1>
+        <p style={{ color: '#64748B', fontSize: '13px', margin: 0 }}>Gestiona los datos de tu empresa emisora en el SRI</p>
       </div>
 
+      {/* Alerts */}
       {success && (
-        <div className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl px-4 py-3 mb-5">
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#F0FDF4', border: '1px solid #BBF7D0', color: '#15803D', fontSize: '13px', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ flexShrink: 0 }} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
           {success}
         </div>
       )}
       {error && (
-        <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-5">
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#DC2626', fontSize: '13px', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
           {error}
         </div>
       )}
@@ -101,6 +126,7 @@ export default function CompaniesPage() {
       {companies.map(company => {
         const isEditing = editing?.id === company.id;
         const isProd    = company.sriEnvironment === '2';
+        const initials  = (company.businessName ?? 'N').slice(0, 2).toUpperCase();
 
         const setField = (key: keyof Company) =>
           (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -109,90 +135,133 @@ export default function CompaniesPage() {
           };
 
         return (
-          <div key={company.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm mb-4">
+          <div key={company.id} style={{ background: '#fff', borderRadius: '20px', border: '1px solid #E2E8F0', overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.05)', marginBottom: '16px' }}>
+
             {isEditing && editing ? (
-              /* ── Edit form ── */
-              <div>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-base font-semibold text-slate-900">Editar empresa</h3>
-                  <button type="button" onClick={handleCancelEdit} className="text-sm text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
+              /* ── Edit Form ─────────────────────────────────────────────── */
+              <div style={{ padding: '28px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>Editar empresa</h3>
+                  <button type="button" onClick={handleCancelEdit}
+                    style={{ background: '#F1F5F9', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '13px', color: '#64748B', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+                    Cancelar
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 gap-5">
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div>
-                    <label htmlFor={ids.ruc} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">RUC</label>
-                    <input id={ids.ruc} type="text" disabled value={editing.ruc} className={INPUT_CLS} />
+                    <label htmlFor={ids.ruc} style={LABEL_STYLE}>RUC</label>
+                    <input id={ids.ruc} type="text" disabled value={editing.ruc} style={INPUT_DISABLED} />
                   </div>
                   <div>
-                    <label htmlFor={ids.biz} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">Razón social</label>
-                    <input id={ids.biz} type="text" value={editing.businessName} onChange={setField('businessName')} className={INPUT_CLS} />
+                    <label htmlFor={ids.biz} style={LABEL_STYLE}>Razón social</label>
+                    <input id={ids.biz} type="text" value={editing.businessName} onChange={setField('businessName')} style={INPUT_STYLE} />
                   </div>
                   <div>
-                    <label htmlFor={ids.trade} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">Nombre comercial</label>
-                    <input id={ids.trade} type="text" value={editing.tradeName} onChange={setField('tradeName')} className={INPUT_CLS} />
+                    <label htmlFor={ids.trade} style={LABEL_STYLE}>Nombre comercial</label>
+                    <input id={ids.trade} type="text" value={editing.tradeName} onChange={setField('tradeName')} style={INPUT_STYLE} />
                   </div>
                   <div>
-                    <label htmlFor={ids.phone} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">Teléfono</label>
-                    <input id={ids.phone} type="text" value={editing.phone} onChange={setField('phone')} className={INPUT_CLS} />
+                    <label htmlFor={ids.phone} style={LABEL_STYLE}>Teléfono</label>
+                    <input id={ids.phone} type="text" value={editing.phone} onChange={setField('phone')} style={INPUT_STYLE} />
                   </div>
-                  <div className="col-span-2">
-                    <label htmlFor={ids.addr} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">Dirección</label>
-                    <input id={ids.addr} type="text" value={editing.address} onChange={setField('address')} className={INPUT_CLS} />
-                  </div>
-                  <div>
-                    <label htmlFor={ids.email} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
-                    <input id={ids.email} type="email" value={editing.email} onChange={setField('email')} className={INPUT_CLS} />
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label htmlFor={ids.addr} style={LABEL_STYLE}>Dirección</label>
+                    <input id={ids.addr} type="text" value={editing.address} onChange={setField('address')} style={INPUT_STYLE} />
                   </div>
                   <div>
-                    <label htmlFor={ids.env} className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">Ambiente SRI</label>
-                    <select id={ids.env} value={editing.sriEnvironment} onChange={setField('sriEnvironment')} className={INPUT_CLS}>
+                    <label htmlFor={ids.email} style={LABEL_STYLE}>Email</label>
+                    <input id={ids.email} type="email" value={editing.email} onChange={setField('email')} style={INPUT_STYLE} />
+                  </div>
+                  <div>
+                    <label htmlFor={ids.env} style={LABEL_STYLE}>Ambiente SRI</label>
+                    <select id={ids.env} value={editing.sriEnvironment} onChange={setField('sriEnvironment')} style={SELECT_STYLE}>
                       <option value="1">Pruebas</option>
                       <option value="2">Producción</option>
                     </select>
                   </div>
                 </div>
-                <div className="flex gap-3 mt-6 pt-5 border-t border-slate-100">
-                  <button type="button" onClick={handleCancelEdit} className="px-4 py-2.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">Cancelar</button>
-                  <button type="button" onClick={handleSave} disabled={saving} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition-colors">
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #F1F5F9', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={handleCancelEdit}
+                    style={{ padding: '10px 18px', background: '#F8FAFC', color: '#374151', border: '1px solid #E2E8F0', borderRadius: '10px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    Cancelar
+                  </button>
+                  <button type="button" onClick={handleSave} disabled={saving}
+                    style={{ padding: '10px 22px', background: 'linear-gradient(135deg,#1D4ED8,#3B82F6)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: saving ? 0.7 : 1, boxShadow: '0 4px 14px rgba(29,78,216,0.3)' }}>
                     {saving ? 'Guardando...' : 'Guardar cambios'}
                   </button>
                 </div>
               </div>
+
             ) : (
-              /* ── View mode ── */
+              /* ── View Mode ─────────────────────────────────────────────── */
               <div>
-                <div className="flex items-start justify-between mb-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center flex-shrink-0 shadow-md shadow-blue-600/20">
-                      <span className="text-white text-xl font-bold">{company.businessName?.[0] ?? 'N'}</span>
+                {/* Top gradient banner */}
+                <div style={{ background: 'linear-gradient(135deg,#0F2456 0%,#1E40AF 100%)', padding: '24px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ width: '52px', height: '52px', borderRadius: '16px', background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)', border: '1.5px solid rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <span style={{ color: '#fff', fontSize: '20px', fontWeight: 800 }}>{initials}</span>
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-slate-900">{company.businessName}</h3>
-                      <p className="text-sm text-slate-500 mt-0.5">{company.tradeName}</p>
+                      <h3 style={{ color: '#fff', fontSize: '18px', fontWeight: 800, margin: '0 0 3px', letterSpacing: '-0.01em' }}>{company.businessName}</h3>
+                      <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: '13px', margin: 0 }}>{company.tradeName}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${isProd ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${isProd ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '6px',
+                      padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 700,
+                      background: isProd ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
+                      color: isProd ? '#4ADE80' : '#FCD34D',
+                      border: `1px solid ${isProd ? 'rgba(74,222,128,0.3)' : 'rgba(252,211,77,0.3)'}`,
+                    }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isProd ? '#4ADE80' : '#FCD34D', flexShrink: 0 }} />
                       {isProd ? 'Producción' : 'Pruebas'}
                     </span>
-                    <button type="button" onClick={() => setEditing(company)} className="flex items-center gap-1.5 px-3.5 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-colors border border-blue-200">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    <button type="button" onClick={() => setEditing(company)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+                      <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
                       Editar
                     </button>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-4 p-5 bg-slate-50 rounded-xl border border-slate-100">
-                  {[
-                    { label: 'RUC',       value: company.ruc },
-                    { label: 'Email',     value: company.email },
-                    { label: 'Teléfono',  value: company.phone },
-                    { label: 'Dirección', value: company.address },
-                  ].map(({ label, value }) => (
-                    <div key={label}>
-                      <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
-                      <p className="text-sm font-medium text-slate-800">{value ?? '—'}</p>
+
+                {/* Data grid */}
+                <div style={{ padding: '24px 28px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
+                    {[
+                      { label: 'RUC', value: company.ruc, icon: '🪪', mono: true },
+                      { label: 'Email', value: company.email, icon: '✉️', mono: false },
+                      { label: 'Teléfono', value: company.phone, icon: '📞', mono: true },
+                      { label: 'Dirección', value: company.address, icon: '📍', mono: false },
+                    ].map(({ label, value, icon, mono }) => (
+                      <div key={label} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                        <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#F8FAFC', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '16px' }}>
+                          {icon}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 3px' }}>{label}</p>
+                          <p style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A', margin: 0, fontFamily: mono ? 'monospace' : 'inherit', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value ?? '—'}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* SRI info strip */}
+                  <div style={{ marginTop: '20px', padding: '14px 18px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: isProd ? '#22C55E' : '#F59E0B', boxShadow: `0 0 6px ${isProd ? 'rgba(34,197,94,0.5)' : 'rgba(245,158,11,0.5)'}` }} />
+                      <p style={{ color: '#374151', fontSize: '13px', fontWeight: 600, margin: 0 }}>
+                        SRI Ecuador · Ambiente {isProd ? 'Producción' : 'Pruebas'}
+                      </p>
                     </div>
-                  ))}
+                    <p style={{ color: '#94A3B8', fontSize: '12px', margin: 0 }}>
+                      {company.isActive ? '✓ Empresa activa' : '⚠ Empresa inactiva'}
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
