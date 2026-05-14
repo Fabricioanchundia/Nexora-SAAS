@@ -15,11 +15,13 @@ interface Customer {
   readonly phone: string | null;
 }
 
+const ID_TYPES = ['04', '05', '06', '07', '08'] as const;
+
 const schema = z.object({
-  identificationType: z.enum(['04', '05', '06', '07', '08']),
+  identificationType: z.enum(ID_TYPES),
   identification: z.string().min(1, 'Requerido'),
   fullName:       z.string().min(2, 'Requerido'),
-  email:          z.string().email('Email inválido').optional().or(z.literal('')),
+  email:          z.union([z.string().pipe(z.string().min(1).email({ message: 'Email inválido' })), z.literal('')]).optional(),
   phone:          z.string().optional(),
   address:        z.string().optional(),
 });
@@ -151,8 +153,8 @@ export default function CustomersPage() {
       const tc = TYPE_COLORS[c.identificationType] ?? { bg:'#F8FAFC', text:'#475569', border:'#E2E8F0' };
       return (
         <tr key={c.id} style={{ borderBottom:'1px solid #F8FAFC', transition:'background 0.1s' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background='#F8FAFC'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background='transparent'; }}>
+          onMouseEnter={e => { e.currentTarget.style.background='#F8FAFC'; }}
+          onMouseLeave={e => { e.currentTarget.style.background='transparent'; }}>
           <td style={{ padding:'12px 16px' }}>
             <span style={{ display:'inline-flex', alignItems:'center', background:tc.bg, color:tc.text, border:`1px solid ${tc.border}`, borderRadius:'20px', fontSize:'11.5px', fontWeight:600, padding:'3px 10px' }}>
               {ID_TYPE_LABELS[c.identificationType] ?? c.identificationType}

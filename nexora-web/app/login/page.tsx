@@ -81,7 +81,7 @@ export default function LoginPage() {
   const lbl: React.CSSProperties = { display:'block', fontSize:'13px', fontWeight:600, color:'#374151', marginBottom:'6px' };
   const fd:  React.CSSProperties = { marginBottom:'15px' };
 
-  const doLogin = useCallback(async (e: React.FormEvent) => {
+  const doLogin = useCallback(async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!lEmail || !lPass) { setLErr('Ingresa tu correo y contraseña'); return; }
     setLLoad(true); setLErr('');
@@ -119,7 +119,7 @@ export default function LoginPage() {
     } finally { setLLoad(false); }
   }, [lEmail, lPass, router]);
 
-  const doRegister = useCallback(async (e: React.FormEvent) => {
+  const doRegister = useCallback(async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!rName || !rEmail || !rPass) { setRErr('Completa todos los campos'); return; }
     if (rPass !== rConf)             { setRErr('Las contraseñas no coinciden'); return; }
