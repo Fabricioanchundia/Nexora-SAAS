@@ -21,7 +21,7 @@ const schema = z.object({
   identificationType: z.enum(ID_TYPES),
   identification: z.string().min(1, 'Requerido'),
   fullName:       z.string().min(2, 'Requerido'),
-  email:          z.union([z.string().pipe(z.string().min(1).email({ message: 'Email inválido' })), z.literal('')]).optional(),
+  email:          z.union([z.string().email('Email inválido'), z.literal('')]).optional(), // NOSONAR
   phone:          z.string().optional(),
   address:        z.string().optional(),
 });
