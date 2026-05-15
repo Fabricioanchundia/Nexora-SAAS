@@ -92,7 +92,7 @@ function AnimatedBackground() {
           const b = particles[j];
           const dx = a.x - b.x;
           const dy = a.y - b.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+          const dist = Math.hypot(dx, dy);
           if (dist < 130) {
             const opacity = (1 - dist / 130) * 0.15;
             ctx.beginPath();
