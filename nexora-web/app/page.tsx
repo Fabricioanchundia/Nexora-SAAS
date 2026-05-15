@@ -193,73 +193,110 @@ function FeaturesSection() {
   );
 }
 
+// ── S3776: extraer estilos según highlight para reducir complejidad cognitiva ──
+interface PlanCardStyles {
+  card: React.CSSProperties;
+  nameColor: string;
+  priceColor: string;
+  freeColor: string;
+  descColor: string;
+  amountColor: string;
+  unitColor: string;
+  featureColor: string;
+  ctaBg: string;
+  ctaColor: string;
+  ctaShadow: string;
+  divider: string;
+}
+
+function getPlanStyles(highlight: boolean): PlanCardStyles {
+  if (highlight) {
+    return {
+      card:         { borderRadius: '22px', padding: '32px 28px', background: 'linear-gradient(160deg,#0F2456,#1E40AF,#1D4ED8)', border: '2px solid #3B82F6', boxShadow: '0 16px 48px rgba(29,78,216,0.35)', position: 'relative' },
+      nameColor:    'rgba(255,255,255,0.5)',
+      priceColor:   '#93C5FD',
+      freeColor:    '#fff',
+      descColor:    'rgba(255,255,255,0.5)',
+      amountColor:  '#93C5FD',
+      unitColor:    'rgba(255,255,255,0.4)',
+      featureColor: 'rgba(255,255,255,0.8)',
+      ctaBg:        'linear-gradient(135deg,#fff,#E0F2FE)',
+      ctaColor:     '#1D4ED8',
+      ctaShadow:    '0 4px 16px rgba(255,255,255,0.2)',
+      divider:      'rgba(255,255,255,0.1)',
+    };
+  }
+  return {
+    card:         { borderRadius: '22px', padding: '32px 28px', background: '#fff', border: '1px solid #E2E8F0', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', position: 'relative' },
+    nameColor:    '#94A3B8',
+    priceColor:   '#1D4ED8',
+    freeColor:    '#0F172A',
+    descColor:    '#64748B',
+    amountColor:  '#1D4ED8',
+    unitColor:    '#94A3B8',
+    featureColor: '#374151',
+    ctaBg:        'linear-gradient(135deg,#1D4ED8,#3B82F6)',
+    ctaColor:     '#fff',
+    ctaShadow:    '0 4px 14px rgba(29,78,216,0.3)',
+    divider:      '#F1F5F9',
+  };
+}
+
+interface PlanCardProps {
+  readonly plan: Plan;
+  readonly onRegister: () => void;
+}
+
+function PlanCard({ plan, onRegister }: PlanCardProps) {
+  const s = getPlanStyles(plan.highlight);
+  return (
+    <div style={s.card}>
+      {plan.highlight && (
+        <div style={{ position: 'absolute', top: '-14px', left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg,#F59E0B,#FCD34D)', color: '#78350F', fontSize: '11px', fontWeight: 800, padding: '4px 18px', borderRadius: '20px', whiteSpace: 'nowrap' }}>
+          ⭐ Más popular
+        </div>
+      )}
+      <p style={{ color: s.nameColor, fontSize: '12px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', margin: '0 0 12px' }}>{plan.name}</p>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', marginBottom: '6px' }}>
+        {plan.price === 0
+          ? <span style={{ color: s.freeColor, fontSize: '42px', fontWeight: 900, lineHeight: 1 }}>Gratis</span>
+          : <>
+              <span style={{ color: s.amountColor, fontSize: '42px', fontWeight: 900, lineHeight: 1 }}>${plan.price}</span>
+              <span style={{ color: s.unitColor, fontSize: '14px', paddingBottom: '8px' }}>USD/mes</span>
+            </>
+        }
+      </div>
+      <p style={{ color: s.descColor, fontSize: '14px', margin: '0 0 24px' }}>{plan.desc}</p>
+      <button type="button" onClick={onRegister}
+        style={{ width: '100%', padding: '13px', borderRadius: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginBottom: '24px', background: s.ctaBg, color: s.ctaColor, border: 'none', boxShadow: s.ctaShadow }}>
+        {plan.cta}
+      </button>
+      <div style={{ height: '1px', background: s.divider, marginBottom: '20px' }} />
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {plan.features.map(f => (
+          <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', color: s.featureColor, fontSize: '14px' }}>
+            <Check color={plan.highlight ? '#60A5FA' : '#3B82F6'} />
+            {f}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function PricingSection({ onRegister }: Readonly<{ onRegister: () => void }>) {
   return (
     <section id="pricing" style={{ padding: '96px 5%', background: '#fff' }}>
       <div style={{ maxWidth: '1140px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '64px' }}>
           <p style={{ color: '#2563EB', fontSize: '12px', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: '12px' }}>Precios</p>
-          <h2 style={{ color: '#0F172A', fontSize: 'clamp(28px,4vw,40px)', fontWeight: 800, margin: '0 0 16px', letterSpacing: '-0.02em' }}>
-            Sin letra pequeña
-          </h2>
+          <h2 style={{ color: '#0F172A', fontSize: 'clamp(28px,4vw,40px)', fontWeight: 800, margin: '0 0 16px', letterSpacing: '-0.02em' }}>Sin letra pequeña</h2>
           <p style={{ color: '#64748B', fontSize: '17px', maxWidth: '440px', margin: '0 auto', lineHeight: 1.6 }}>
             Empieza gratis. Crece cuando lo necesites. Sin permanencia ni contratos.
           </p>
         </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '24px', alignItems: 'start' }}>
-          {PLANS.map(plan => (
-            <div key={plan.name} style={{
-              borderRadius: '22px', padding: '32px 28px',
-              background: plan.highlight ? 'linear-gradient(160deg,#0F2456,#1E40AF,#1D4ED8)' : '#fff',
-              border: plan.highlight ? '2px solid #3B82F6' : '1px solid #E2E8F0',
-              boxShadow: plan.highlight ? '0 16px 48px rgba(29,78,216,0.35)' : '0 2px 8px rgba(0,0,0,0.04)',
-              position: 'relative',
-            }}>
-              {plan.highlight && (
-                <div style={{ position: 'absolute', top: '-14px', left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg,#F59E0B,#FCD34D)', color: '#78350F', fontSize: '11px', fontWeight: 800, padding: '4px 18px', borderRadius: '20px', whiteSpace: 'nowrap' }}>
-                  ⭐ Más popular
-                </div>
-              )}
-
-              <p style={{ color: plan.highlight ? 'rgba(255,255,255,0.5)' : '#94A3B8', fontSize: '12px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', margin: '0 0 12px' }}>{plan.name}</p>
-
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', marginBottom: '6px' }}>
-                {plan.price === 0
-                  ? <span style={{ color: plan.highlight ? '#fff' : '#0F172A', fontSize: '42px', fontWeight: 900, lineHeight: 1 }}>Gratis</span>
-                  : <>
-                    <span style={{ color: plan.highlight ? '#93C5FD' : '#1D4ED8', fontSize: '42px', fontWeight: 900, lineHeight: 1 }}>${plan.price}</span>
-                    <span style={{ color: plan.highlight ? 'rgba(255,255,255,0.4)' : '#94A3B8', fontSize: '14px', paddingBottom: '8px' }}>USD/mes</span>
-                  </>
-                }
-              </div>
-
-              <p style={{ color: plan.highlight ? 'rgba(255,255,255,0.5)' : '#64748B', fontSize: '14px', margin: '0 0 24px' }}>{plan.desc}</p>
-
-              <button type="button" onClick={onRegister}
-                style={{
-                  width: '100%', padding: '13px', borderRadius: '12px', fontSize: '14px', fontWeight: 700,
-                  cursor: 'pointer', fontFamily: 'inherit', marginBottom: '24px',
-                  background: plan.highlight ? 'linear-gradient(135deg,#fff,#E0F2FE)' : 'linear-gradient(135deg,#1D4ED8,#3B82F6)',
-                  color: plan.highlight ? '#1D4ED8' : '#fff',
-                  border: 'none',
-                  boxShadow: plan.highlight ? '0 4px 16px rgba(255,255,255,0.2)' : '0 4px 14px rgba(29,78,216,0.3)',
-                }}>
-                {plan.cta}
-              </button>
-
-              <div style={{ height: '1px', background: plan.highlight ? 'rgba(255,255,255,0.1)' : '#F1F5F9', marginBottom: '20px' }} />
-
-              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {plan.features.map(f => (
-                  <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', color: plan.highlight ? 'rgba(255,255,255,0.8)' : '#374151', fontSize: '14px' }}>
-                    <Check color={plan.highlight ? '#60A5FA' : '#3B82F6'} />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {PLANS.map(plan => <PlanCard key={plan.name} plan={plan} onRegister={onRegister} />)}
         </div>
       </div>
     </section>
