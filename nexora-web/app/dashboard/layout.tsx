@@ -2,33 +2,10 @@
 
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
+import Image from 'next/image';
 
 interface DashboardLayoutProps {
   readonly children: React.ReactNode;
-}
-
-// ── Nexora Labs Logo ─────────────────────────────────────────────────────────
-function NexoraLogoMark() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="sl1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#00C8FF" />
-          <stop offset="100%" stopColor="#1D4ED8" />
-        </linearGradient>
-        <linearGradient id="sl2" x1="0%" y1="100%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#3B82F6" />
-          <stop offset="100%" stopColor="#7DD3FC" />
-        </linearGradient>
-      </defs>
-      <polygon points="28,168 28,32 68,32 68,100 132,32 172,32 172,168 132,168 132,100 68,168" fill="url(#sl1)" />
-      <polygon points="68,32 108,32 68,80" fill="url(#sl2)" opacity="0.55" />
-      <polygon points="132,168 92,168 132,120" fill="url(#sl2)" opacity="0.55" />
-      <g transform="translate(158,36)">
-        <polygon points="0,-8 2,-2 8,0 2,2 0,8 -2,2 -8,0 -2,-2" fill="#BAE6FD" />
-      </g>
-    </svg>
-  );
 }
 
 const NAV_ITEMS = [
@@ -86,7 +63,6 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
-  // ── Planes de suscripción ─────────────────────────────────────────────────
   {
     label: 'Planes',
     href: '/dashboard/plans',
@@ -120,7 +96,7 @@ function NavItem({ label, href, icon, isActive, onNavigate }: NavItemProps) {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router   = useRouter();
   const pathname = usePathname();
-  const [mounted, setMounted]   = useState(false);
+  const [mounted,  setMounted]  = useState(false);
   const [userName, setUserName] = useState('');
 
   useEffect(() => {
@@ -164,37 +140,75 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           --tx-sec:    rgba(255,255,255,0.45);
           --tx-mut:    rgba(255,255,255,0.22);
         }
-        .nx-layout { display:flex; min-height:100vh; background:#F1F5F9; font-family:var(--font-sans,system-ui,sans-serif); }
-        .nx-sidebar { width:var(--sb-width); background:var(--sb-bg); border-right:1px solid var(--sb-border); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:40; }
-        .nx-brand { display:flex; align-items:center; gap:10px; padding:18px 16px 16px; border-bottom:1px solid var(--sb-border); }
-        .nx-brand-name { font-size:13.5px; font-weight:700; letter-spacing:0.08em; color:#fff; line-height:1; display:block; }
-        .nx-brand-sub  { font-size:10px; color:var(--tx-mut); display:block; margin-top:3px; letter-spacing:0.04em; }
-        .nx-nav { flex:1; padding:14px 10px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; }
+        .nx-layout   { display:flex; min-height:100vh; background:#F1F5F9; font-family:var(--font-sans,system-ui,sans-serif); }
+        .nx-sidebar  { width:var(--sb-width); background:var(--sb-bg); border-right:1px solid var(--sb-border); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:40; }
+
+        /* ── Brand con logo PNG ── */
+        .nx-brand { padding:0; border-bottom:1px solid var(--sb-border); overflow:hidden; }
+        .nx-brand-logo-wrap {
+          display:flex; align-items:center; justify-content:center;
+          padding: 14px 16px 10px;
+          background: linear-gradient(160deg, #0d1e3d 0%, #112347 100%);
+        }
+        .nx-brand-logo-inner {
+          background: #ffffff;
+          border-radius: 12px;
+          padding: 6px 14px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+        }
+        .nx-brand-sub-row {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 7px 16px 10px;
+          background: linear-gradient(160deg, #112347 0%, #0d1e3d 100%);
+        }
+        .nx-brand-dot { width:5px; height:5px; border-radius:50%; background:#22C55E; box-shadow:0 0 6px rgba(34,197,94,0.8); flex-shrink:0; }
+        .nx-brand-tag { font-size:10px; color:rgba(147,197,253,0.6); letter-spacing:0.06em; font-weight:500; }
+
+        .nx-nav       { flex:1; padding:14px 10px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; }
         .nx-nav-label { font-size:9.5px; font-weight:600; letter-spacing:0.1em; color:var(--tx-mut); padding:0 10px; margin:0 0 8px; text-transform:uppercase; }
-        .nav-item { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; font-size:13.5px; font-weight:400; color:var(--tx-sec); background:transparent; border:none; cursor:pointer; text-align:left; transition:all 0.15s ease; }
+        .nav-item     { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; font-size:13.5px; font-weight:400; color:var(--tx-sec); background:transparent; border:none; cursor:pointer; text-align:left; transition:all 0.15s ease; }
         .nav-item:hover { background:rgba(255,255,255,0.05); color:var(--tx-pri); }
         .nav-item.active { background:var(--blue-soft); color:#60A5FA; font-weight:500; }
-        .nav-icon { display:flex; align-items:center; justify-content:center; width:18px; flex-shrink:0; opacity:0.7; }
+        .nav-icon     { display:flex; align-items:center; justify-content:center; width:18px; flex-shrink:0; opacity:0.7; }
         .nav-item.active .nav-icon { opacity:1; }
-        .nav-dot { width:5px; height:5px; border-radius:50%; background:#3B82F6; margin-left:auto; flex-shrink:0; }
-        .nx-user { padding:10px 10px 14px; border-top:1px solid var(--sb-border); }
+        .nav-dot      { width:5px; height:5px; border-radius:50%; background:#3B82F6; margin-left:auto; flex-shrink:0; }
+
+        .nx-user      { padding:10px 10px 14px; border-top:1px solid var(--sb-border); }
         .nx-user-card { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:8px; margin-bottom:4px; }
-        .nx-avatar { width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,#1D4ED8,#3B82F6); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:#fff; flex-shrink:0; }
+        .nx-avatar    { width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,#1D4ED8,#3B82F6); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:#fff; flex-shrink:0; }
         .nx-user-name { font-size:12.5px; font-weight:500; color:var(--tx-pri); margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px; }
         .nx-user-role { font-size:10.5px; color:var(--tx-mut); margin:0; }
-        .nx-logout { display:flex; align-items:center; gap:8px; width:100%; padding:8px 10px; border-radius:8px; font-size:12.5px; font-weight:400; color:rgba(248,113,113,0.7); background:transparent; border:none; cursor:pointer; text-align:left; transition:all 0.15s; }
+        .nx-logout    { display:flex; align-items:center; gap:8px; width:100%; padding:8px 10px; border-radius:8px; font-size:12.5px; font-weight:400; color:rgba(248,113,113,0.7); background:transparent; border:none; cursor:pointer; text-align:left; transition:all 0.15s; }
         .nx-logout:hover { background:rgba(239,68,68,0.08); color:#F87171; }
-        .nx-main { margin-left:var(--sb-width); flex:1; min-height:100vh; overflow:auto; }
+        .nx-main      { margin-left:var(--sb-width); flex:1; min-height:100vh; overflow:auto; }
       `}</style>
 
       <div className="nx-layout">
         <aside className="nx-sidebar">
-          {/* Brand con logo SVG */}
+
+          {/* ── Brand con logo PNG real ── */}
           <div className="nx-brand">
-            <NexoraLogoMark />
-            <div>
-              <span className="nx-brand-name">NEXORA</span>
-              <span className="nx-brand-sub">Facturación Electrónica</span>
+            <div className="nx-brand-logo-wrap">
+              <div className="nx-brand-logo-inner">
+                <Image
+                  src="/nexora-logo.png"
+                  alt="Nexora Labs"
+                  width={148}
+                  height={56}
+                  style={{ objectFit: 'contain', display: 'block' }}
+                  priority
+                />
+              </div>
+            </div>
+            <div className="nx-brand-sub-row">
+              <span className="nx-brand-dot" />
+              <span className="nx-brand-tag">Facturación Electrónica · SRI</span>
             </div>
           </div>
 
@@ -217,10 +231,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </nav>
 
           <div className="nx-user">
-            {userName && (
+            {userName !== '' && (
               <div className="nx-user-card">
                 <div className="nx-avatar">{initials}</div>
-                <div style={{ minWidth:0 }}>
+                <div style={{ minWidth: 0 }}>
                   <p className="nx-user-name">{userName}</p>
                   <p className="nx-user-role">Administrador</p>
                 </div>
