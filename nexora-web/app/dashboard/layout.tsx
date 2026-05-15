@@ -1,265 +1,316 @@
 'use client';
 
+import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { useDark } from '@/lib/useDark';
-import api from '@/lib/api';
+import Image from 'next/image';
 
-interface Invoice {
-  readonly id: string;
-  readonly sequential: string;
-  readonly total: number;
-  readonly status: string;
-  readonly customer: { readonly fullName: string };
+interface DashboardLayoutProps {
+  readonly children: React.ReactNode;
 }
 
-const STATUS_MAP: Readonly<Record<string, { label: string; bg: string; dot: string; text: string; darkBg: string; darkText: string }>> = {
-  AUTHORIZED:   { label: 'Autorizada',  bg: '#F0FDF4', dot: '#22C55E', text: '#15803D', darkBg: 'rgba(34,197,94,0.15)',  darkText: '#4ADE80' },
-  REJECTED:     { label: 'Rechazada',   bg: '#FEF2F2', dot: '#EF4444', text: '#B91C1C', darkBg: 'rgba(239,68,68,0.15)',   darkText: '#F87171' },
-  ERROR:        { label: 'Error',       bg: '#FEF2F2', dot: '#EF4444', text: '#B91C1C', darkBg: 'rgba(239,68,68,0.15)',   darkText: '#F87171' },
-  PROCESSING:   { label: 'Procesando',  bg: '#EFF6FF', dot: '#3B82F6', text: '#1D4ED8', darkBg: 'rgba(59,130,246,0.15)',  darkText: '#60A5FA' },
-  SUBMITTED:    { label: 'Enviada SRI', bg: '#EFF6FF', dot: '#3B82F6', text: '#1D4ED8', darkBg: 'rgba(59,130,246,0.15)',  darkText: '#60A5FA' },
-  PENDING_SIGN: { label: 'Pendiente',   bg: '#FFFBEB', dot: '#F59E0B', text: '#B45309', darkBg: 'rgba(245,158,11,0.15)',  darkText: '#FCD34D' },
-  DRAFT:        { label: 'Borrador',    bg: '#F8FAFC', dot: '#94A3B8', text: '#475569', darkBg: 'rgba(148,163,184,0.1)',  darkText: '#94A3B8' },
-};
+const NAV_ITEMS = [
+  { label: 'Dashboard',    href: '/dashboard',              icon: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg> },
+  { label: 'Facturas',     href: '/dashboard/invoices',     icon: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg> },
+  { label: 'Clientes',     href: '/dashboard/customers',    icon: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg> },
+  { label: 'Productos',    href: '/dashboard/products',     icon: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg> },
+  { label: 'Empresas',     href: '/dashboard/companies',    icon: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg> },
+  { label: 'Certificados', href: '/dashboard/certificates', icon: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg> },
+  { label: 'Planes',       href: '/dashboard/plans',        icon: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> },
+] as const;
 
-function parseInvoices(data: unknown): Invoice[] {
-  if (Array.isArray(data)) return data as Invoice[];
-  const d = data as Record<string, unknown> | null;
-  if (d !== null && Array.isArray(d?.data))     return d.data as Invoice[];
-  if (d !== null && Array.isArray(d?.invoices)) return d.invoices as Invoice[];
-  return [];
+// Módulos próximamente — clickeables
+const COMING_SOON = [
+  { label: 'Inventario',     href: '/dashboard/inventory', icon: '📦', color: '#059669' },
+  { label: 'Punto de Venta', href: '/dashboard/pos',       icon: '🖥️', color: '#7C3AED' },
+] as const;
+
+interface NavItemProps {
+  readonly label: string;
+  readonly href: string;
+  readonly icon: React.ReactNode;
+  readonly isActive: boolean;
+  readonly onNavigate: (href: string) => void;
 }
 
-function getGreeting(h: number): string {
-  if (h < 12) return 'Buenos días';
-  if (h < 18) return 'Buenas tardes';
-  return 'Buenas noches';
+function NavItem({ label, href, icon, isActive, onNavigate }: NavItemProps) {
+  const handleClick = useCallback(() => onNavigate(href), [onNavigate, href]);
+  return (
+    <button type="button" onClick={handleClick}
+      style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '9px 10px', borderRadius: '8px', fontSize: '13.5px', fontWeight: isActive ? 500 : 400, color: isActive ? '#60A5FA' : 'rgba(255,255,255,0.45)', background: isActive ? 'rgba(59,130,246,0.12)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '18px', flexShrink: 0, opacity: isActive ? 1 : 0.7 }}>{icon}</span>
+      <span>{label}</span>
+      {isActive && <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#3B82F6', marginLeft: 'auto', flexShrink: 0 }} />}
+    </button>
+  );
 }
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const dark   = useDark();
-
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loading,  setLoading]  = useState(true);
+export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const router   = useRouter();
+  const pathname = usePathname();
+  const [mounted,  setMounted]  = useState(false);
   const [userName, setUserName] = useState('');
+  const [dark,     setDark]     = useState(false);
 
-  // ── Paleta según tema ───────────────────────────────────────
-  const C = {
-    bg:      dark ? '#060e25'                   : '#F1F5F9',
-    card:    dark ? '#0d1b35'                   : '#ffffff',
-    border:  dark ? 'rgba(255,255,255,0.07)'    : '#F1F5F9',
-    shadow:  dark ? '0 2px 16px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.05)',
-    tx1:     dark ? 'rgba(255,255,255,0.92)'    : '#0F172A',
-    tx2:     dark ? 'rgba(255,255,255,0.50)'    : '#64748B',
-    tx3:     dark ? 'rgba(255,255,255,0.28)'    : '#94A3B8',
-    divider: dark ? 'rgba(255,255,255,0.06)'    : '#F8FAFC',
-    tblHead: dark ? 'rgba(255,255,255,0.03)'    : '#F8FAFC',
-    hover:   dark ? 'rgba(255,255,255,0.04)'    : '#F8FAFC',
-    badge:   dark ? 'rgba(255,255,255,0.06)'    : '#F8FAFC',
-    progBg:  dark ? 'rgba(255,255,255,0.08)'    : '#E2E8F0',
-  };
-
-  const loadData = useCallback(async () => {
-    try {
-      const res = await api.get('/invoices?page=1&limit=100').catch(() => null);
-      if (res !== null) setInvoices(parseInvoices(res.data?.data));
-    } catch (e: unknown) { console.error('[Dashboard]', e); }
-    finally { setLoading(false); }
-  }, []);
-
+  // ── Aplicar tema al <html> — única forma garantizada ──────────
   useEffect(() => {
+    setMounted(true);
     const token = globalThis.localStorage.getItem('nexora_token');
     if (!token) { router.push('/login'); return; }
-    setUserName(globalThis.localStorage.getItem('nexora_user_name') ?? '');
-    loadData();
-    const t = setInterval(loadData, 30_000);
-    return () => clearInterval(t);
-  }, [router, loadData]);
+    const name = globalThis.localStorage.getItem('nexora_user_name');
+    if (name) setUserName(name);
 
-  const goTo     = useCallback((href: string) => router.push(href), [router]);
-  const goInv    = useCallback((id: string) => router.push(`/dashboard/invoices/${id}`), [router]);
+    const saved = globalThis.localStorage.getItem('nexora_theme');
+    const isDark = saved === 'dark';
+    setDark(isDark);
+    if (isDark) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }, [router]);
 
-  const authorized = invoices.filter(i => i.status === 'AUTHORIZED');
-  const pending    = invoices.filter(i => ['PROCESSING','PENDING_SIGN','SUBMITTED'].includes(i.status));
-  const errors     = invoices.filter(i => ['ERROR','REJECTED'].includes(i.status));
-  const rejected   = invoices.filter(i => i.status === 'REJECTED');
-  const totalAmt   = authorized.reduce((a, i) => a + Number(i.total ?? 0), 0);
-  const avgTicket  = authorized.length > 0 ? totalAmt / authorized.length : 0;
-  const authRate   = invoices.length > 0 ? Math.round((authorized.length / invoices.length) * 100) : 0;
-  const quotaPct   = Math.min(100, (invoices.length / 20) * 100);
-  const recent     = invoices.slice(0, 8);
-  const greeting   = getGreeting(new Date().getHours());
-  const firstName  = userName.split(' ')[0] ?? 'Usuario';
+  const handleToggle = useCallback(() => {
+    setDark(prev => {
+      const next = !prev;
+      globalThis.localStorage.setItem('nexora_theme', next ? 'dark' : 'light');
+      if (next) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      return next;
+    });
+  }, []);
 
-  function StatusPill({ status }: Readonly<{ status: string }>) {
-    const s = STATUS_MAP[status] ?? { label: status, bg: '#F8FAFC', dot: '#94A3B8', text: '#475569', darkBg: 'rgba(148,163,184,0.1)', darkText: '#94A3B8' };
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: dark ? s.darkBg : s.bg, color: dark ? s.darkText : s.text, fontSize: '11.5px', fontWeight: 600, padding: '3px 9px', borderRadius: '20px', whiteSpace: 'nowrap' }}>
-        <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: s.dot, flexShrink: 0 }} />
-        {s.label}
-      </span>
-    );
-  }
+  const handleNavigate = useCallback((href: string) => router.push(href), [router]);
+  const handleLogout   = useCallback(() => {
+    globalThis.localStorage.removeItem('nexora_token');
+    globalThis.localStorage.removeItem('nexora_company_id');
+    globalThis.localStorage.removeItem('nexora_user_name');
+    router.push('/login');
+  }, [router]);
 
-  function StatCard({ label, value, sub, color, icon }: Readonly<{ label: string; value: string | number; sub?: string; color: string; icon: React.ReactNode }>) {
-    return (
-      <div style={{ background: C.card, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, boxShadow: C.shadow }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: C.tx3, margin: 0, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</p>
-          <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>{icon}</div>
-        </div>
-        <p style={{ fontSize: '30px', fontWeight: 900, color: loading ? C.tx3 : C.tx1, margin: '0 0 4px', lineHeight: 1, letterSpacing: '-0.02em' }}>
-          {loading ? '—' : value}
-        </p>
-        {sub !== undefined && <p style={{ fontSize: '11.5px', color: C.tx3, margin: 0 }}>{sub}</p>}
-      </div>
-    );
-  }
+  const initials = userName.split(' ').slice(0, 2).map(n => n[0] ?? '').join('').toUpperCase() || 'N';
+
+  if (!mounted) return null;
 
   return (
-    <div style={{ padding: '32px 36px 48px', background: C.bg, minHeight: '100vh', fontFamily: 'system-ui,-apple-system,sans-serif', transition: 'background 0.3s' }}>
+    <>
+      <style>{`
+        /* ════════════════════════════════════════════════
+           NEXORA — Sistema de temas claro / oscuro
+           Se aplica en :root[data-theme="dark"]
+        ════════════════════════════════════════════════ */
 
-      {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
-        <p style={{ fontSize: '13px', color: C.tx2, margin: '0 0 4px' }}>{greeting}, {firstName} 👋</p>
-        <h1 style={{ fontSize: '26px', fontWeight: 800, color: C.tx1, margin: 0, letterSpacing: '-0.01em' }}>Dashboard</h1>
-      </div>
+        :root {
+          --nx-bg:           #F1F5F9;
+          --nx-card:         #ffffff;
+          --nx-card-border:  #F1F5F9;
+          --nx-card-shadow:  0 1px 4px rgba(0,0,0,0.05);
+          --nx-tx1:          #0F172A;
+          --nx-tx2:          #64748B;
+          --nx-tx3:          #94A3B8;
+          --nx-input-bg:     #F8FAFC;
+          --nx-input-border: #E2E8F0;
+          --nx-divider:      #F1F5F9;
+          --nx-table-head:   #F8FAFC;
+          --nx-row-hover:    #F8FAFC;
+          --nx-badge-gray:   #F8FAFC;
+          --nx-badge-gray-tx:#475569;
+        }
 
-      {/* Stats grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '14px', marginBottom: '16px' }}>
-        <StatCard label="Total facturas" value={invoices.length} sub="Este período" color="#6366F1"
-          icon={<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>} />
-        <StatCard label="Autorizadas" value={authorized.length} sub={`${authRate}% tasa aprobación`} color="#22C55E"
-          icon={<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>} />
-        <StatCard label="Total facturado" value={`$${totalAmt.toFixed(2)}`} sub={`Prom. $${avgTicket.toFixed(2)}`} color="#3B82F6"
-          icon={<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>} />
-        <StatCard label="En proceso" value={pending.length} sub="Pendientes SRI" color="#F59E0B"
-          icon={<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>} />
-        <StatCard label="Con error" value={errors.length} sub="Requieren atención" color="#EF4444"
-          icon={<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>} />
-        <StatCard label="Rechazadas" value={rejected.length} sub="Por el SRI" color="#8B5CF6"
-          icon={<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>} />
-      </div>
+        :root[data-theme="dark"] {
+          --nx-bg:           #060e25;
+          --nx-card:         #0d1b35;
+          --nx-card-border:  rgba(255,255,255,0.07);
+          --nx-card-shadow:  0 2px 16px rgba(0,0,0,0.35);
+          --nx-tx1:          rgba(255,255,255,0.92);
+          --nx-tx2:          rgba(255,255,255,0.52);
+          --nx-tx3:          rgba(255,255,255,0.28);
+          --nx-input-bg:     rgba(255,255,255,0.05);
+          --nx-input-border: rgba(255,255,255,0.1);
+          --nx-divider:      rgba(255,255,255,0.06);
+          --nx-table-head:   rgba(255,255,255,0.03);
+          --nx-row-hover:    rgba(255,255,255,0.04);
+          --nx-badge-gray:   rgba(255,255,255,0.06);
+          --nx-badge-gray-tx:rgba(255,255,255,0.5);
+        }
 
-      {/* Cuota plan */}
-      <div style={{ background: C.card, borderRadius: '16px', padding: '18px 20px', border: `1px solid ${C.border}`, marginBottom: '20px', boxShadow: C.shadow }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <div>
-            <p style={{ fontWeight: 700, color: C.tx1, fontSize: '14px', margin: '0 0 2px' }}>Cuota del plan gratuito</p>
-            <p style={{ color: C.tx3, fontSize: '12px', margin: 0 }}>20 facturas / mes incluidas</p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontWeight: 800, color: quotaPct >= 90 ? '#EF4444' : '#3B82F6', fontSize: '16px' }}>{invoices.length}/20</span>
-            <button type="button" onClick={() => goTo('/dashboard/plans')}
-              style={{ background: 'linear-gradient(135deg,#1D4ED8,#3B82F6)', color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-              Mejorar plan
-            </button>
-          </div>
-        </div>
-        <div style={{ height: '8px', background: C.progBg, borderRadius: '99px', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${quotaPct}%`, background: quotaPct >= 90 ? '#EF4444' : 'linear-gradient(90deg,#3B82F6,#6366F1)', borderRadius: '99px', transition: 'width 0.6s' }} />
-        </div>
-      </div>
+        /* ── Aplicar variables a TODO el dashboard ── */
+        .nx-main {
+          background: var(--nx-bg) !important;
+          transition: background 0.3s;
+        }
 
-      {/* Main grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 290px', gap: '20px', alignItems: 'start' }}>
+        /* Cards / paneles blancos */
+        .nx-main div[style*="background: '#fff'"],
+        .nx-main div[style*="background:'#fff'"],
+        .nx-main div[style*="background: rgb(255, 255, 255)"],
+        .nx-main div[style*="background:#fff"] {
+          background: var(--nx-card) !important;
+          border-color: var(--nx-card-border) !important;
+          box-shadow: var(--nx-card-shadow) !important;
+        }
 
-        {/* Tabla */}
-        <div style={{ background: C.card, borderRadius: '18px', border: `1px solid ${C.border}`, overflow: 'hidden', boxShadow: C.shadow }}>
-          <div style={{ padding: '18px 20px', borderBottom: `1px solid ${C.divider}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <h2 style={{ fontSize: '15px', fontWeight: 700, color: C.tx1, margin: 0 }}>Facturas recientes</h2>
-            <button type="button" onClick={() => goTo('/dashboard/invoices')}
-              style={{ fontSize: '13px', color: '#3B82F6', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>Ver todas →</button>
-          </div>
-          {loading
-            ? <div style={{ padding: '40px', textAlign: 'center', color: C.tx3 }}>Cargando...</div>
-            : recent.length === 0
-              ? <div style={{ padding: '48px', textAlign: 'center' }}><p style={{ color: C.tx2, fontWeight: 600, margin: 0 }}>Sin facturas aún</p></div>
-              : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: C.tblHead }}>
-                      {['Secuencial','Cliente','Total','Estado'].map(h => (
-                        <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '10.5px', fontWeight: 700, color: C.tx3, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recent.map(inv => (
-                      <tr key={inv.id} onClick={() => goInv(inv.id)}
-                        style={{ cursor: 'pointer', borderBottom: `1px solid ${C.divider}` }}
-                        onMouseEnter={e => { e.currentTarget.style.background = C.hover; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                        <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '12px', color: C.tx3 }}>{inv.sequential}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', color: C.tx1, fontWeight: 500 }}>{inv.customer?.fullName ?? '-'}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', color: C.tx1, fontWeight: 600 }}>${Number(inv.total).toFixed(2)}</td>
-                        <td style={{ padding: '12px 16px' }}><StatusPill status={inv.status} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-          }
-        </div>
+        /* Fondo gris claro de secciones */
+        .nx-main div[style*="background: '#F1F5F9'"],
+        .nx-main div[style*="background:'#F1F5F9'"],
+        .nx-main div[style*="background: '#F8FAFC'"],
+        .nx-main div[style*="background:'#F8FAFC'"] {
+          background: var(--nx-badge-gray) !important;
+        }
 
-        {/* Sidebar derecho */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        /* Textos primarios */
+        .nx-main *[style*="color: '#0F172A'"],
+        .nx-main *[style*="color:'#0F172A'"],
+        .nx-main h1, .nx-main h2, .nx-main h3 {
+          color: var(--nx-tx1) !important;
+        }
 
-          {/* Acciones */}
-          <div style={{ background: C.card, borderRadius: '18px', border: `1px solid ${C.border}`, padding: '18px', boxShadow: C.shadow }}>
-            <h2 style={{ fontSize: '15px', fontWeight: 700, color: C.tx1, margin: '0 0 12px' }}>Acciones rápidas</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button type="button" onClick={() => goTo('/dashboard/invoices/new')}
-                style={{ padding: '11px 16px', background: 'linear-gradient(135deg,#1D4ED8,#3B82F6)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '13.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 4px 12px rgba(29,78,216,0.35)' }}>
-                + Nueva factura
-              </button>
-              {[{ label: '+ Nuevo cliente', href: '/dashboard/customers' }, { label: '+ Nuevo producto', href: '/dashboard/products' }].map(a => (
-                <button key={a.href} type="button" onClick={() => goTo(a.href)}
-                  style={{ padding: '10px 16px', background: C.badge, color: C.tx1, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  {a.label}
-                </button>
-              ))}
-            </div>
-          </div>
+        /* Textos secundarios */
+        .nx-main *[style*="color: '#64748B'"],
+        .nx-main *[style*="color:'#64748B'"] {
+          color: var(--nx-tx2) !important;
+        }
 
-          {/* Resumen numérico */}
-          <div style={{ background: C.card, borderRadius: '18px', border: `1px solid ${C.border}`, padding: '18px', boxShadow: C.shadow }}>
-            <h2 style={{ fontSize: '15px', fontWeight: 700, color: C.tx1, margin: '0 0 12px' }}>Resumen</h2>
-            {[
-              { label: 'Tasa autorización', value: `${authRate}%`,           color: '#22C55E' },
-              { label: 'Ticket promedio',   value: `$${avgTicket.toFixed(2)}`, color: '#3B82F6' },
-              { label: 'Total facturado',   value: `$${totalAmt.toFixed(2)}`, color: '#6366F1' },
-            ].map(s => (
-              <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: `1px solid ${C.divider}` }}>
-                <span style={{ fontSize: '13px', color: C.tx2 }}>{s.label}</span>
-                <span style={{ fontSize: '14px', fontWeight: 700, color: s.color }}>{loading ? '—' : s.value}</span>
+        .nx-main *[style*="color: '#94A3B8'"],
+        .nx-main *[style*="color:'#94A3B8'"],
+        .nx-main *[style*="color: '#475569'"],
+        .nx-main *[style*="color:'#475569'"] {
+          color: var(--nx-tx3) !important;
+        }
+
+        /* Inputs */
+        .nx-main input,
+        .nx-main select,
+        .nx-main textarea {
+          background: var(--nx-input-bg) !important;
+          border-color: var(--nx-input-border) !important;
+          color: var(--nx-tx1) !important;
+        }
+
+        /* Tablas */
+        .nx-main table { color: var(--nx-tx1); }
+        .nx-main th    { background: var(--nx-table-head) !important; color: var(--nx-tx3) !important; }
+        .nx-main tr    { border-color: var(--nx-divider) !important; }
+
+        /* Bordes */
+        .nx-main *[style*="border: '1px solid #E2E8F0'"],
+        .nx-main *[style*="border: '1px solid #F1F5F9'"],
+        .nx-main *[style*="borderBottom: '1px solid #F8FAFC'"],
+        .nx-main *[style*="borderTop: '1px solid #F1F5F9'"] {
+          border-color: var(--nx-divider) !important;
+        }
+
+        /* Sidebar */
+        .nx-sidebar { width:240px; background:#0B1628; border-right:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:40; }
+        .nx-main    { margin-left:240px; flex:1; min-height:100vh; overflow:auto; }
+        .nx-layout  { display:flex; min-height:100vh; font-family:system-ui,-apple-system,sans-serif; }
+
+        /* Toggle switch animación */
+        .nx-toggle-track { width:38px; height:21px; border-radius:11px; position:relative; transition:background 0.25s; flex-shrink:0; cursor:pointer; }
+        .nx-toggle-thumb { position:absolute; top:2.5px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left 0.25s; display:flex; align-items:center; justify-content:center; font-size:10px; box-shadow:0 1px 4px rgba(0,0,0,0.3); }
+
+        /* Hover nav */
+        .nx-nav-btn:hover { background:rgba(255,255,255,0.06) !important; color:rgba(255,255,255,0.85) !important; }
+
+        /* Próximamente badge */
+        .nx-soon { display:inline-flex; align-items:center; padding:2px 7px; borderRadius:6px; background:rgba(255,255,255,0.08); fontSize:9.5px; color:rgba(255,255,255,0.3); fontWeight:600; letterSpacing:0.05em; border-radius:6px; }
+      `}</style>
+
+      <div className="nx-layout" style={{ background: 'var(--nx-bg)' }}>
+        <aside className="nx-sidebar">
+
+          {/* Logo */}
+          <div style={{ padding: 0, borderBottom: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '14px 16px 10px', background: 'linear-gradient(160deg,#0d1e3d,#112347)' }}>
+              <div style={{ background: '#fff', borderRadius: '12px', padding: '6px 14px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 12px rgba(0,0,0,0.3)' }}>
+                <Image src="/nexora-logo.png" alt="Nexora Labs" width={148} height={56} style={{ objectFit: 'contain', display: 'block' }} priority />
               </div>
-            ))}
-          </div>
-
-          {/* Plan */}
-          <div style={{ background: 'linear-gradient(145deg,#1E3A8A,#1E1B4B)', borderRadius: '18px', padding: '18px', boxShadow: '0 4px 20px rgba(30,58,138,0.3)' }}>
-            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', margin: '0 0 4px' }}>Mi plan</p>
-            <p style={{ color: '#fff', fontSize: '16px', fontWeight: 700, margin: '0 0 10px' }}>Gratuito</p>
-            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: '12px', margin: '0 0 12px' }}>Módulo de suscripciones próximamente</p>
-            <button type="button" onClick={() => goTo('/dashboard/plans')}
-              style={{ width: '100%', background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '10px', padding: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-              Ver planes →
-            </button>
-          </div>
-
-          {/* SRI */}
-          <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#22C55E', boxShadow: '0 0 8px rgba(34,197,94,0.6)', flexShrink: 0 }} />
-            <div>
-              <p style={{ fontWeight: 700, color: C.tx1, fontSize: '13px', margin: '0 0 1px' }}>SRI Ecuador</p>
-              <p style={{ color: '#22C55E', fontSize: '11.5px', fontWeight: 600, margin: 0 }}>Producción · Operando</p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '7px 16px 10px', background: 'linear-gradient(160deg,#112347,#0d1e3d)' }}>
+              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#22C55E', boxShadow: '0 0 6px rgba(34,197,94,0.8)', flexShrink: 0 }} />
+              <span style={{ fontSize: '10px', color: 'rgba(147,197,253,0.6)', letterSpacing: '0.06em', fontWeight: 500 }}>Facturación Electrónica · SRI</span>
             </div>
           </div>
-        </div>
+
+          {/* Nav */}
+          <nav style={{ flex: 1, padding: '14px 10px', display: 'flex', flexDirection: 'column', gap: '2px', overflowY: 'auto' }} aria-label="Navegación principal">
+            <p style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.22)', padding: '0 10px', margin: '0 0 8px', textTransform: 'uppercase' }}>Menú</p>
+
+            {NAV_ITEMS.map((item) => {
+              const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
+              return <NavItem key={item.href} label={item.label} href={item.href} icon={item.icon} isActive={isActive} onNavigate={handleNavigate} />;
+            })}
+
+            {/* Separador módulos próximamente */}
+            <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '10px 0 8px' }} />
+            <p style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.22)', padding: '0 10px', margin: '0 0 6px', textTransform: 'uppercase' }}>Próximamente</p>
+
+            {COMING_SOON.map(m => (
+              <button key={m.label} type="button" onClick={() => handleNavigate(m.href)}
+                style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '9px 10px', borderRadius: '8px', fontSize: '13.5px', color: 'rgba(255,255,255,0.35)', cursor: 'pointer', background: 'transparent', border: 'none', fontFamily: 'inherit', textAlign: 'left' }}>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '18px', flexShrink: 0, fontSize: '14px', opacity: 0.5 }}>{m.icon}</span>
+                <span style={{ flex: 1 }}>{m.label}</span>
+                <span style={{ fontSize: '8.5px', fontWeight: 700, color: m.color, background: `${m.color}18`, border: `1px solid ${m.color}30`, borderRadius: '4px', padding: '1px 5px', letterSpacing: '0.04em', flexShrink: 0 }}>
+                  PRONTO
+                </span>
+              </button>
+            ))}
+          </nav>
+
+          {/* User + toggle + logout */}
+          <div style={{ padding: '10px 10px 14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+
+            {/* User card */}
+            {userName !== '' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px', borderRadius: '8px', marginBottom: '6px' }}>
+                <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: 'linear-gradient(135deg,#1D4ED8,#3B82F6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0 }}>{initials}</div>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: '12.5px', fontWeight: 500, color: 'rgba(255,255,255,0.9)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>{userName}</p>
+                  <p style={{ fontSize: '10.5px', color: 'rgba(255,255,255,0.22)', margin: 0 }}>Administrador</p>
+                </div>
+              </div>
+            )}
+
+            {/* Toggle modo oscuro */}
+            <button
+              type="button"
+              onClick={handleToggle}
+              aria-label={dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', marginBottom: '4px' }}
+            >
+              <div
+                className="nx-toggle-track"
+                style={{ background: dark ? '#3B82F6' : 'rgba(255,255,255,0.15)', border: dark ? 'none' : '1px solid rgba(255,255,255,0.15)' }}
+              >
+                <div
+                  className="nx-toggle-thumb"
+                  style={{ left: dark ? '19px' : '2.5px' }}
+                >
+                  {dark ? '🌙' : '☀️'}
+                </div>
+              </div>
+              <span style={{ fontSize: '12.5px', fontWeight: 500, color: 'rgba(255,255,255,0.45)' }}>
+                {dark ? 'Modo oscuro' : 'Modo claro'}
+              </span>
+            </button>
+
+            {/* Logout */}
+            <button type="button" onClick={handleLogout}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 10px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 400, color: 'rgba(248,113,113,0.7)', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Cerrar sesión
+            </button>
+          </div>
+        </aside>
+
+        <main className="nx-main">
+          {children}
+        </main>
       </div>
-    </div>
+    </>
   );
 }
