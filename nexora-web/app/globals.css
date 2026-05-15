@@ -3,20 +3,10 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-}
-
-@theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
@@ -24,3 +14,58 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── Nexora Login Animations ─────────────────────────────────── */
+@keyframes nxspin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes nx-float-1 {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50%       { transform: translateY(-40px) scale(1.08); }
+}
+
+@keyframes nx-float-2 {
+  0%, 100% { transform: translateY(0px) translateX(0px); }
+  33%      { transform: translateY(-20px) translateX(15px); }
+  66%      { transform: translateY(25px) translateX(-10px); }
+}
+
+@keyframes nx-float-3 {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50%      { transform: translateY(30px) scale(0.92); }
+}
+
+@keyframes nx-pulse {
+  0%, 100% { opacity: 0.2; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(1.15); }
+}
+
+@keyframes nx-twinkle {
+  0%, 100% { opacity: 0.1; }
+  50%      { opacity: 0.7; }
+}
+
+@keyframes nx-drift {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  25%  { transform: translate(15px, -20px) rotate(90deg); }
+  50%  { transform: translate(-10px, -35px) rotate(180deg); }
+  75%  { transform: translate(-20px, -15px) rotate(270deg); }
+  100% { transform: translate(0, 0) rotate(360deg); }
+}
+
+.nx-blob-1 { animation: nx-float-1 9s ease-in-out infinite; }
+.nx-blob-2 { animation: nx-float-2 13s ease-in-out infinite; }
+.nx-blob-3 { animation: nx-float-3 11s ease-in-out infinite; }
+.nx-blob-4 { animation: nx-float-1 7s ease-in-out infinite reverse; }
+.nx-pulse   { animation: nx-pulse 5s ease-in-out infinite; }
+
+.nx-star-1  { animation: nx-twinkle 3s ease-in-out infinite; }
+.nx-star-2  { animation: nx-twinkle 4s ease-in-out 1s infinite; }
+.nx-star-3  { animation: nx-twinkle 5s ease-in-out 2s infinite; }
+.nx-star-4  { animation: nx-twinkle 3.5s ease-in-out 0.5s infinite; }
+.nx-star-5  { animation: nx-twinkle 4.5s ease-in-out 1.5s infinite; }
+.nx-star-6  { animation: nx-twinkle 6s ease-in-out 3s infinite; }
+
+.nx-drift   { animation: nx-drift 20s linear infinite; }
+.nx-spinner { animation: nxspin 0.7s linear infinite; }
