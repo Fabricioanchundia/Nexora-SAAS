@@ -164,25 +164,46 @@ export default function LoginPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(160deg,#0F172A 0%,#1E3A8A 55%,#1D4ED8 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px 16px', fontFamily: 'system-ui,-apple-system,sans-serif', position: 'relative', overflow: 'hidden' }}>
-      <style>{`@keyframes nxspin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes nxspin { to { transform: rotate(360deg); } }
+        @keyframes float1 { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-30px) scale(1.05); } }
+        @keyframes float2 { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(20px) scale(0.95); } }
+        @keyframes float3 { 0%,100% { transform: translate(0,0); } 33% { transform: translate(20px,-15px); } 66% { transform: translate(-10px,20px); } }
+        @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.7; } }
+      `}</style>
 
-      {/* Decoración */}
-      <div style={{ position: 'absolute', top: '-120px', right: '-120px', width: '500px', height: '500px', borderRadius: '50%', background: 'rgba(59,130,246,0.08)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', bottom: '-100px', left: '-80px', width: '400px', height: '400px', borderRadius: '50%', background: 'rgba(29,78,216,0.1)', pointerEvents: 'none' }} />
+      {/* Burbujas animadas de fondo */}
+      <div style={{ position: 'absolute', top: '-100px', right: '-100px', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(59,130,246,0.18) 0%, transparent 70%)', animation: 'float1 8s ease-in-out infinite', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', bottom: '-120px', left: '-80px', width: '450px', height: '450px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(29,78,216,0.2) 0%, transparent 70%)', animation: 'float2 10s ease-in-out infinite', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', top: '40%', left: '10%', width: '250px', height: '250px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(96,165,250,0.1) 0%, transparent 70%)', animation: 'float3 12s ease-in-out infinite', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', top: '20%', right: '15%', width: '180px', height: '180px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(147,197,253,0.12) 0%, transparent 70%)', animation: 'pulse 6s ease-in-out infinite', pointerEvents: 'none' }} />
+
+      {/* Partículas pequeñas */}
+      {[
+        { top: '15%', left: '20%', size: '6px', delay: '0s' },
+        { top: '70%', left: '80%', size: '8px', delay: '2s' },
+        { top: '45%', left: '5%',  size: '5px', delay: '4s' },
+        { top: '80%', left: '30%', size: '7px', delay: '1s' },
+        { top: '25%', left: '75%', size: '5px', delay: '3s' },
+      ].map((p, i) => (
+        <div key={i} style={{ position: 'absolute', top: p.top, left: p.left, width: p.size, height: p.size, borderRadius: '50%', background: 'rgba(147,197,253,0.4)', animation: `pulse 4s ease-in-out ${p.delay} infinite`, pointerEvents: 'none' }} />
+      ))}
 
       <div style={{ width: '100%', maxWidth: '440px', position: 'relative' }}>
 
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <Image
-            src="/nexora-logo.png"
-            alt="Nexora Labs"
-            width={200}
-            height={112}
-            style={{ objectFit: 'contain', filter: 'drop-shadow(0 4px 24px rgba(59,130,246,0.45))', maxWidth: '200px' }}
-            priority
-          />
-          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12.5px', margin: '6px 0 0' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.96)', borderRadius: '20px', padding: '16px 28px', boxShadow: '0 8px 32px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.15)', marginBottom: '10px' }}>
+            <Image
+              src="/nexora-logo.png"
+              alt="Nexora Labs"
+              width={180}
+              height={80}
+              style={{ objectFit: 'contain', display: 'block' }}
+              priority
+            />
+          </div>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12.5px', margin: 0 }}>
             Facturación electrónica · SRI Ecuador
           </p>
         </div>
